@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits, GuildMember } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, GuildMember, MessageFlags } from 'discord.js';
 import { Command } from '../interfaces/command';
 import { AdminService } from '../services/admin.service';
 import { config } from '../config';
@@ -42,6 +42,12 @@ export const adminCommand: Command = {
                .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to remove').setRequired(false).setMinValue(0))
         )
         .addSubcommand(sub => 
+            sub.setName('approve')
+               .setDescription('Setujui workspace user dan aktifkan durasi langganan')
+               .addUserOption(opt => opt.setName('target').setDescription('User yang ingin diapprove').setRequired(true))
+               .addIntegerOption(opt => opt.setName('days').setDescription('Jumlah hari aktif (default: 30)').setRequired(false).setMinValue(1))
+        )
+        .addSubcommand(sub => 
             sub.setName('delete_workspace')
                .setDescription('Force delete a user workspace')
                .addUserOption(opt => opt.setName('target').setDescription('The user').setRequired(true))
@@ -54,7 +60,7 @@ export const adminCommand: Command = {
         
         // Allow Owner (ADMIN_ID) or Role
         if (interaction.user.id !== config.adminId && !isAdmin) {
-            await interaction.reply({ content: '⛔ Access Denied.', ephemeral: true });
+            await interaction.reply({ content: '⛔ Access Denied.', flags: MessageFlags.Ephemeral });
             return;
         }
 
@@ -66,15 +72,19 @@ export const adminCommand: Command = {
                 // Send to channel so it stays
                 if (interaction.channel && interaction.channel.isSendable()) {
                     await interaction.channel.send({ embeds: view.embeds, components: view.components });
-                    await interaction.reply({ content: '✅ Tutorial Deployed!', ephemeral: true });
+                    await interaction.reply({ content: '✅ Tutorial Deployed!', flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.reply({ content: '❌ Cannot send messages here.', ephemeral: true });
+                    await interaction.reply({ content: '❌ Cannot send messages here.', flags: MessageFlags.Ephemeral });
                 }
             }
 
             else if (subcommand === 'stats') {
                 const statsView = await renderStats();
-                await interaction.reply({ embeds: statsView.embeds, ephemeral: true });
+                await interaction.reply({
+                    flags: (statsView as any).flags || MessageFlags.Ephemeral,
+                    components: (statsView as any).components,
+                    embeds: []
+                } as any);
             }
 
             else if (subcommand === 'user_info') {
@@ -82,7 +92,7 @@ export const adminCommand: Command = {
                 const userInfo = await AdminService.getUserInfo(targetUser.id);
 
                 if (!userInfo) {
-                    await interaction.reply({ content: 'User not found in database.', ephemeral: true });
+                    await interaction.reply({ content: 'User not found in database.', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
@@ -93,7 +103,7 @@ export const adminCommand: Command = {
                         { name: 'Expiry', value: userInfo.expiryDate ? userInfo.expiryDate.toLocaleString() : 'Expired/None', inline: true },
                         { name: 'Accounts', value: userInfo._count.accounts.toString(), inline: true }
                     );
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
             }
 
             else if (subcommand === 'add_time') {
@@ -103,12 +113,12 @@ export const adminCommand: Command = {
                 const minutes = interaction.options.getInteger('minutes') || 0;
 
                 if (days === 0 && hours === 0 && minutes === 0) {
-                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', ephemeral: true });
+                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', flags: MessageFlags.Ephemeral });
                     return;
                 }
                 
                 await AdminService.addTime(targetUser.id, days, hours, minutes, interaction.client);
-                await interaction.reply({ content: `✅ Added **${days}d ${hours}h ${minutes}m** to ${targetUser.username}. Workspace updated.`, ephemeral: true });
+                await interaction.reply({ content: `✅ Added **${days}d ${hours}h ${minutes}m** to ${targetUser.username}. Workspace updated.`, flags: MessageFlags.Ephemeral });
             }
 
             else if (subcommand === 'remove_time') {
@@ -118,17 +128,36 @@ export const adminCommand: Command = {
                 const minutes = interaction.options.getInteger('minutes') || 0;
                 
                 if (days === 0 && hours === 0 && minutes === 0) {
-                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', ephemeral: true });
+                    await interaction.reply({ content: '❌ Please specify at least days, hours, or minutes.', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
                 await AdminService.removeTime(targetUser.id, days, hours, minutes, interaction.client);
-                await interaction.reply({ content: `✅ Removed **${days}d ${hours}h ${minutes}m** from ${targetUser.username}. Workspace updated.`, ephemeral: true });
+                await interaction.reply({ content: `✅ Removed **${days}d ${hours}h ${minutes}m** from ${targetUser.username}. Workspace updated.`, flags: MessageFlags.Ephemeral });
+            }
+
+            else if (subcommand === 'approve') {
+                const targetUser = interaction.options.getUser('target', true);
+                const days = interaction.options.getInteger('days') || 30;
+
+                const { WorkspaceService } = require('../services/workspace.service');
+                const newExpiry = await WorkspaceService.approveWorkspace(
+                    interaction.client,
+                    config.guildId || interaction.guildId || '',
+                    targetUser.id,
+                    days,
+                    interaction.user.tag
+                );
+
+                await interaction.reply({
+                    content: `✅ **Workspace Approved!**\nUser: <@${targetUser.id}> (${targetUser.tag})\nDurasi: **+${days} Hari**\nAktif Hingga: \`${newExpiry.toLocaleString('id-ID')}\` 🚀`,
+                    flags: MessageFlags.Ephemeral
+                });
             }
 
             else if (subcommand === 'delete_workspace') {
                 const targetUser = interaction.options.getUser('target', true);
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 
                 await AdminService.deleteWorkspace(targetUser.id, interaction.client);
                 
@@ -144,7 +173,7 @@ export const adminCommand: Command = {
                 if (interaction.replied || interaction.deferred) {
                     await interaction.editReply({ content: `❌ Error: ${error.message}` });
                 } else {
-                    await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true });
+                    await interaction.reply({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral });
                 }
             } catch (e) {
                 Logger.error('Failed to send error response', e, 'AdminCommand');

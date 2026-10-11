@@ -1,35 +1,78 @@
-import { EmbedBuilder } from 'discord.js';
 import { AdminService } from '../services/admin.service';
 import { Logger } from '../utils/logger';
+import { ThemeService } from '../config/theme.config';
+import { PluginService } from '../services/plugin.service';
 
 export async function renderStats() {
     try {
+        const customRenderer = PluginService.getViewOverride('stats');
+        if (customRenderer) {
+            return await customRenderer();
+        }
+
+        const theme = ThemeService.getTheme();
         const stats = await AdminService.getStats();
-        const now = Math.floor(Date.now() / 1000) - 1;
+        const now = Math.floor(Date.now() / 1000);
 
-        const embed = new EmbedBuilder()
-            .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **GLOBAL STATISTICS** <a:GREEN_CROWN:1306056562435035190>
-\u200b
-<a:arrow:1306059259615903826> Total Users      : **${stats.totalUsers.toLocaleString()}**
-<a:arrow:1306059259615903826> Total Accounts   : **${stats.totalAccounts.toLocaleString()}**
-<a:arrow:1306059259615903826> Active Workers   : **${stats.activeTasks.toLocaleString()}**
-         <a:arrow:1306059259615903826> Total Messages Sent : **${stats.totalMessagesSent.toLocaleString()}**
+        const contentStats = `- Users : **${stats.totalUsers.toLocaleString()}**\n- Accounts : **${stats.totalAccounts.toLocaleString()}**\n- Workers : **${stats.activeTasks.toLocaleString()}**\n- MSG Sent : **${stats.totalMessagesSent.toLocaleString()}**\n\n-# Last Update [ <t:${now}:R> ]`;
 
-
-Last Update: <t:${now}:R>
-`)
-            .setColor(0x57F287)
-            .setFooter({ text: 'AutoPost | Powered by Frey' })
-            .setTimestamp()
-            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
-
-        return { content: null, embeds: [embed] };
+        return {
+            flags: 32768,
+            embeds: [],
+            components: [
+                {
+                    type: 17,
+                    components: [
+                        {
+                            type: 12,
+                            items: [
+                                {
+                                    media: {
+                                        url: theme.branding.bannerUrl || "https://media.discordapp.net/attachments/1467178310210425016/1538633232294088856/standard.gif?ex=6a83635d&is=6a8211dd&hm=a5af81d93cd4d3bfdb5ea3b06f076bccb25300b97b76935b0b41e2f5cb8d1493&="
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            type: 14,
+                            spacing: 1,
+                            divider: true
+                        },
+                        {
+                            type: 9,
+                            components: [
+                                {
+                                    type: 10,
+                                    content: contentStats
+                                }
+                            ],
+                            accessory: {
+                                type: 11,
+                                media: {
+                                    url: theme.branding.logoUrl || "https://media.discordapp.net/attachments/1467178310210425016/1538630569464963072/imresizer-ChatGPTImage10Mei2026031102-min.png?ex=6a8360e2&is=6a820f62&hm=982c0a5975b9b55d842bead57d22c74d9283919c9034693f2f3fcc44218ea964&=&format=webp&quality=lossless&width=1024&height=1024"
+                                }
+                            }
+                        },
+                        {
+                            type: 14,
+                            spacing: 1,
+                            divider: true
+                        },
+                        {
+                            type: 10,
+                            content: `\n-# <:zyro:1513003016746176583> ${theme.branding.footerText} [ 2026 ]`
+                        }
+                    ]
+                }
+            ]
+        };
     } catch (error) {
         Logger.error('Failed to render stats', error, 'StatsView');
         return {
+            flags: 0,
             content: '❌ Failed to load statistics.',
-            embeds: []
+            embeds: [],
+            components: []
         };
     }
 }

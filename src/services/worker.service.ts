@@ -1,13 +1,18 @@
 import { Worker, WorkerOptions } from 'worker_threads';
 import path from 'path';
 import prisma from '../database/client';
-import { Client, ThreadChannel, EmbedBuilder } from 'discord.js';
+import { Client, ThreadChannel, TextChannel, EmbedBuilder } from 'discord.js';
 import { WorkspaceService } from './workspace.service';
 import { Logger } from '../utils/logger';
 import { generateSecureHash } from '../utils/security';
 import { WorkerData, LogData, WorkerGuild, WorkerChannel, WorkerContext, CacheItem, WorkerResult } from '../interfaces/worker';
+import { LicenseService } from './license.service';
+import { PluginService } from './plugin.service';
 
 export class WorkerService {
+    // Discord Client Reference
+    private static mainClient: Client | null = null;
+
     // Core Maps untuk state management
     private static workers = new Map<string, Worker>(); // AccountID -> Worker
     private static activeAccountTasks = new Map<string, Set<string>>(); // AccountID -> Set<TaskID>
@@ -23,10 +28,20 @@ export class WorkerService {
     private static cacheCleanupInterval: NodeJS.Timeout | null = null;
 
     // Konstanta
-    private static readonly MAX_WORKERS_PER_USER = 5;
+    // Unlimited channel workers per user (Limit disabled per user request)
     private static readonly MAX_RESTARTS_PER_HOUR = 5;
     private static readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 Minutes Keep-Alive
     private static readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 Minutes
+
+    // ==================== CLIENT MANAGEMENT ====================
+
+    static setClient(client: Client): void {
+        this.mainClient = client;
+    }
+
+    static getClient(): Client | null {
+        return this.mainClient;
+    }
 
     // ==================== PUBLIC API ====================
 
@@ -35,6 +50,7 @@ export class WorkerService {
      * Menggunakan mutex lock untuk mencegah race condition
      */
     static async startTask(client: Client, taskId: string): Promise<void> {
+        this.mainClient = client;
         const task = await prisma.task.findUnique({
             where: { id: taskId },
             include: { account: true }
@@ -43,17 +59,7 @@ export class WorkerService {
         if (!task) throw new Error('Task not found');
         const accountId = task.account.id;
 
-        // Check Global Limits (Total Active Tasks per User)
-        const userRunningTasks = await prisma.task.count({
-            where: {
-                account: { userId: task.account.userId },
-                status: 'RUNNING'
-            }
-        });
-
-        if (task.status !== 'RUNNING' && userRunningTasks >= this.MAX_WORKERS_PER_USER) {
-            throw new Error(`Limit Reached! You can only run ${this.MAX_WORKERS_PER_USER} active tasks.`);
-        }
+        // Unlimited channel workers / tasks per user (no restriction)
 
         // Acquire lock untuk mencegah race condition
         await this.acquireLock(accountId);
@@ -102,12 +108,22 @@ export class WorkerService {
                 data: { status: 'RUNNING' }
             });
 
+            // Calculate remaining initial delay if resuming task with future nextRun
+            let initialDelay: number | undefined = undefined;
+            if ((task as any).nextRun) {
+                const remaining = new Date((task as any).nextRun).getTime() - Date.now();
+                if (remaining > 5000) {
+                    initialDelay = remaining;
+                }
+            }
+
             // Send START Command
-            Logger.info(`Worker Ready! Starting Task ${taskId}`, 'WorkerService');
+            Logger.info(`Worker Ready! Starting Task ${taskId}${initialDelay ? ` (Resuming with remaining delay: ${(initialDelay / 1000).toFixed(1)}s)` : ''}`, 'WorkerService');
             try {
                 worker.postMessage({
                     type: 'START_TASK',
                     taskId: taskId,
+                    initialDelay,
                     config: {
                         channelId: task.channelId,
                         message: task.message,
@@ -120,7 +136,7 @@ export class WorkerService {
                 // Rollback DB status if postMessage fails
                 await prisma.task.update({
                     where: { id: taskId },
-                    data: { status: 'STOPPED' }
+                    data: { status: 'STOPPED', nextRun: null } as any
                 });
                 this.activeAccountTasks.get(accountId)?.delete(taskId);
                 throw postError;
@@ -156,7 +172,7 @@ export class WorkerService {
             // Update DB first
             await prisma.task.update({
                 where: { id: taskId },
-                data: { status: 'STOPPED' }
+                data: { status: 'STOPPED', nextRun: null } as any
             });
 
             // Send notification jika ada reason
@@ -215,10 +231,17 @@ export class WorkerService {
     /**
      * Fetch daftar guild dari Discord user token
      */
-    static async fetchGuilds(token: string): Promise<WorkerGuild[]> {
+    static async fetchGuilds(token: string, accountId?: string, userId?: string): Promise<WorkerGuild[]> {
         const cacheKey = `guilds_${generateSecureHash(token)}`;
         if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerGuild[];
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token }) as WorkerGuild[];
+        
+        let data: WorkerGuild[];
+        if (accountId && userId) {
+            data = await this.sendRpcToAccountWorker(accountId, token, userId, 'RPC_FETCH_GUILDS');
+        } else {
+            data = await this.runEphemeralWorker({ mode: 'FETCH_GUILDS', token }) as WorkerGuild[];
+        }
+        
         this.setCache(cacheKey, data);
         return data;
     }
@@ -226,10 +249,17 @@ export class WorkerService {
     /**
      * Fetch daftar channel dari guild
      */
-    static async fetchChannels(token: string, guildId: string): Promise<WorkerChannel[]> {
+    static async fetchChannels(token: string, guildId: string, accountId?: string, userId?: string): Promise<WorkerChannel[]> {
         const cacheKey = `channels_${generateSecureHash(token)}_${guildId}`;
         if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerChannel[];
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId }) as WorkerChannel[];
+        
+        let data: WorkerChannel[];
+        if (accountId && userId) {
+            data = await this.sendRpcToAccountWorker(accountId, token, userId, 'RPC_FETCH_CHANNELS', { guildId });
+        } else {
+            data = await this.runEphemeralWorker({ mode: 'FETCH_CHANNELS', token, guildId }) as WorkerChannel[];
+        }
+
         this.setCache(cacheKey, data);
         return data;
     }
@@ -237,10 +267,17 @@ export class WorkerService {
     /**
      * Fetch context (nama guild & channel) untuk display
      */
-    static async fetchContext(token: string, guildId: string, channelId: string): Promise<WorkerContext> {
+    static async fetchContext(token: string, guildId: string, channelId: string, accountId?: string, userId?: string): Promise<WorkerContext> {
         const cacheKey = `context_${generateSecureHash(token)}_${guildId}_${channelId}`;
         if (this.checkCache(cacheKey)) return this.getCache(cacheKey) as WorkerContext;
-        const data = await this.runEphemeralWorker({ mode: 'FETCH_CONTEXT', token, guildId, channelId }) as WorkerContext;
+        
+        let data: WorkerContext;
+        if (accountId && userId) {
+            data = await this.sendRpcToAccountWorker(accountId, token, userId, 'RPC_FETCH_CONTEXT', { guildId, channelId });
+        } else {
+            data = await this.runEphemeralWorker({ mode: 'FETCH_CONTEXT', token, guildId, channelId }) as WorkerContext;
+        }
+
         this.setCache(cacheKey, data);
         return data;
     }
@@ -256,6 +293,7 @@ export class WorkerService {
      * Sync tasks saat startup - resume task yang RUNNING
      */
     static async syncTasksOnStartup(client: Client): Promise<void> {
+        this.mainClient = client;
         Logger.info('Syncing tasks on startup...', 'WorkerService');
         
         // Reset all states
@@ -308,18 +346,11 @@ export class WorkerService {
         }
         this.idleTimers.clear();
 
-        // 4. Terminate all workers
+        // 4. Terminate all workers (keep task status in DB intact for startup sync)
         for (const [id, worker] of this.workers) {
             worker.postMessage('STOP');
             worker.removeAllListeners(); // Prevent memory leak from lingering listeners
-            // Allow grace period then terminate
             setTimeout(() => worker.terminate(), 1000);
-            
-            // Mark all tasks stopped
-            await prisma.task.updateMany({
-                where: { accountId: id, status: 'RUNNING' },
-                data: { status: 'STOPPED' }
-            });
         }
         
         // 5. Clear all Maps
@@ -411,9 +442,79 @@ export class WorkerService {
     }
 
     /**
+     * Mengirim RPC command ke worker yang sedang berjalan atau membuat worker persistent
+     */
+    private static async sendRpcToAccountWorker(
+        accountId: string, 
+        token: string, 
+        userId: string, 
+        type: string, 
+        payload: any = {}
+    ): Promise<any> {
+        let worker = this.workers.get(accountId);
+        if (!worker) {
+            if (this.pendingLogins.has(accountId)) {
+                worker = await this.pendingLogins.get(accountId);
+            } else {
+                const loginPromise = this.spawnAccountWorker(null as any, accountId, token, userId);
+                this.pendingLogins.set(accountId, loginPromise);
+                try {
+                    worker = await loginPromise;
+                } finally {
+                    this.pendingLogins.delete(accountId);
+                }
+            }
+        }
+
+        if (!worker) throw new Error('Worker not available');
+
+        // Reset idle timer if no active tasks
+        const hasActiveTasks = (this.activeAccountTasks.get(accountId)?.size || 0) > 0;
+        if (!hasActiveTasks) {
+            if (this.idleTimers.has(accountId)) {
+                clearTimeout(this.idleTimers.get(accountId)!);
+            }
+            const timer = setTimeout(() => {
+                this.terminateAccount(accountId);
+            }, this.IDLE_TIMEOUT_MS);
+            this.idleTimers.set(accountId, timer);
+        }
+
+        const reqId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error(`RPC request ${type} timed out`));
+            }, 30000);
+
+            const onMessage = (msg: any) => {
+                if (msg && msg.reqId === reqId) {
+                    if (msg.type === 'rpc_data') {
+                        cleanup();
+                        resolve(msg.data);
+                    } else if (msg.type === 'rpc_error') {
+                        cleanup();
+                        reject(new Error(msg.content || 'RPC Error'));
+                    }
+                }
+            };
+
+            const cleanup = () => {
+                clearTimeout(timeout);
+                worker?.off('message', onMessage);
+            };
+
+            worker.on('message', onMessage);
+            worker.postMessage({ type, reqId, ...payload });
+        });
+    }
+
+    /**
      * Spawn worker baru untuk account
      */
-    private static async spawnAccountWorker(client: Client, accountId: string, token: string, userId: string): Promise<Worker> {
+    private static async spawnAccountWorker(client: Client | null, accountId: string, token: string, userId: string): Promise<Worker> {
+        if (client) this.mainClient = client;
         return new Promise((resolve, reject) => {
             const worker = this.createWorker({
                 mode: 'RUN',
@@ -443,13 +544,19 @@ export class WorkerService {
                     // Update Stats
                     if (msg.status === 'success' && msg.taskId) {
                         try {
+                            const nextRun = msg.nextDelay ? new Date(Date.now() + msg.nextDelay) : null;
                             await prisma.task.update({
                                 where: { id: msg.taskId },
-                                data: { totalSent: { increment: 1 } }
+                                data: { 
+                                    totalSent: { increment: 1 },
+                                    lastRun: new Date(),
+                                    nextRun: nextRun
+                                } as any
                             });
                         } catch (e) { }
                     }
-                    await this.forwardLog(client, userId, msg);
+                    const activeClient = client || WorkerService.mainClient;
+                    if (activeClient) await WorkerService.forwardLog(activeClient, userId, msg);
 
                 } else if (msg.type === 'metadata' && msg.taskId) {
                     try {
@@ -480,6 +587,8 @@ export class WorkerService {
                     this.idleTimers.delete(accountId);
                 }
 
+                const activeClient = client || WorkerService.mainClient;
+
                 if (code !== 0) {
                     // Exit code 2 = Token Invalid - Jangan restart, langsung stop
                     if (code === 2) {
@@ -490,13 +599,13 @@ export class WorkerService {
                             where: { accountId: accountId },
                             data: { status: 'STOPPED' }
                         });
-                        await WorkspaceService.refreshControlPanel(client, userId);
+                        if (activeClient) await WorkspaceService.refreshControlPanel(activeClient, userId);
                         return;
                     }
                     
                     // Exit code 1 atau lainnya = Error sementara, boleh restart
                     Logger.warn(`Worker crashed (Code ${code}). Attempting restart...`, `Worker-${accountId}`);
-                    await this.handleAccountCrash(client, accountId, userId);
+                    if (activeClient) await this.handleAccountCrash(activeClient, accountId, userId);
                 }
             });
 
@@ -573,25 +682,71 @@ export class WorkerService {
     static async forwardLog(client: Client, userId: string, logData: LogData): Promise<void> {
         try {
             const user = await prisma.user.findUnique({ where: { id: userId } });
-            if (!user || !user.logThreadId) return;
+            if (!user) return;
 
-            const thread = await client.channels.fetch(user.logThreadId) as ThreadChannel;
-            if (thread) {
+            let targetChannel: any = null;
+
+            if (user.logThreadId) {
+                try {
+                    const fetched = await client.channels.fetch(user.logThreadId);
+                    if (fetched) {
+                        targetChannel = fetched;
+                    }
+                } catch (e) {
+                    Logger.warn(`Failed to fetch logThread ${user.logThreadId}, attempting self-healing...`, 'WorkerService');
+                }
+            }
+
+            // Self-healing: if thread not found or deleted, recreate thread in workspaceChannelId
+            if (!targetChannel && user.workspaceChannelId) {
+                try {
+                    const wsChannel = await client.channels.fetch(user.workspaceChannelId) as TextChannel;
+                    if (wsChannel && wsChannel.isTextBased()) {
+                        const newThread = await wsChannel.threads.create({
+                            name: '📜-live-logs',
+                            autoArchiveDuration: 1440,
+                            reason: 'Recreated logs thread for selfbot activity'
+                        });
+                        await prisma.user.update({
+                            where: { id: userId },
+                            data: { logThreadId: newThread.id }
+                        });
+                        targetChannel = newThread;
+                    }
+                } catch (err) {
+                    Logger.error('Failed to recreate log thread', err, 'WorkerService');
+                }
+            }
+
+            if (targetChannel) {
+                // If thread is archived, unarchive it
+                if (targetChannel.isThread?.()) {
+                    if (targetChannel.archived) {
+                        try {
+                            await targetChannel.setArchived(false);
+                        } catch (e) {}
+                    }
+                    if (targetChannel.joinable && !targetChannel.joined) {
+                        try {
+                            await targetChannel.join();
+                        } catch (e) {}
+                    }
+                }
+
                 const isSuccess = logData.status === 'success';
                 const embed = new EmbedBuilder()
                     .setDescription(`
-## ${isSuccess ? '<a:GREEN_CROWN:1306056562435035190> **LOG NOTIFICATION** <a:GREEN_CROWN:1306056562435035190>' : '❌ **ERROR LOG**'}
+## ${isSuccess ? '👑 **LOG NOTIFICATION** 👑' : '❌ **ERROR LOG**'}
 \u200b
-<a:arrow:1306059259615903826> **Status** : ${isSuccess ? 'Success <a:Tick_green:1306061558303952937>' : 'Failed <a:alert:1306298772124336178>'}
-<a:arrow:1306059259615903826> **Info**   : \`${logData.content}\`
-${logData.url ? `<a:arrow:1306059259615903826> **Link**   : [Jump to Message](${logData.url})` : ''}
-<a:arrow:1306059259615903826> **Next**   : \`${(logData.nextDelay / 1000).toFixed(1)}s\`
+🔹 **Status** : ${isSuccess ? 'Success ✅' : 'Failed ⚠️'}
+🔹 **Info**   : \`${logData.content}\`
+${logData.url ? `🔹 **Link**   : [Jump to Message](${logData.url})\n` : ''}🔹 **Next**   : \`${(logData.nextDelay / 1000).toFixed(1)}s\`
 `)
                     .setColor(isSuccess ? 0x57F287 : 0xED4245)
                     .setTimestamp()
-                    .setFooter({ text: 'AutoPost Log System' });
+                    .setFooter({ text: 'Zyro Post Log System' });
 
-                await thread.send({ embeds: [embed] });
+                await targetChannel.send({ embeds: [embed] });
             }
         } catch (e) {
             Logger.error('Failed to forward log', e, 'WorkerService');
@@ -648,6 +803,13 @@ ${logData.url ? `<a:arrow:1306059259615903826> **Link**   : [Jump to Message](${
     // ==================== WORKER HELPERS ====================
 
     private static createWorker(workerData: WorkerData): Worker {
+        if (!LicenseService.isSessionAuthorized()) {
+            Logger.error('[Security] Attempted to create worker without valid license session!', null, 'WorkerService');
+            throw new Error('[Security] Unauthorized runtime session! License validation failed or was bypassed.');
+        }
+
+        (workerData as any).sessionToken = LicenseService.getSessionToken();
+
         const isTsNode = (process as any)[Symbol.for('ts-node.register.instance')] || __filename.endsWith('.ts');
         const workerFileName = 'bot.worker';
         const finalPath = isTsNode

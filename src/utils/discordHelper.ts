@@ -1,4 +1,5 @@
-import axios from 'axios';
+import { Client } from 'discord.js-selfbot-v13';
+import { sanitizeToken } from './security';
 
 interface DiscordUser {
     id: string;
@@ -7,21 +8,59 @@ interface DiscordUser {
     avatar: string;
 }
 
+/**
+ * Safely validates a Discord User Token using authentic discord.js-selfbot-v13 client
+ * without stripped properties or custom overrides.
+ */
 export async function validateToken(token: string): Promise<DiscordUser | null> {
-    try {
-        const response = await axios.get('https://discord.com/api/v10/users/@me', {
-            headers: {
-                Authorization: token // Selfbot tokens are used directly without "Bot " prefix
-            },
-            timeout: 10000 // 10 second timeout
-        });
-
-        if (response.status === 200) {
-            return response.data as DiscordUser;
-        }
-        return null;
-    } catch (error) {
-        // If 401 Unauthorized or timeout, token is invalid/unreachable
+    const cleanToken = sanitizeToken(token);
+    if (!cleanToken || cleanToken.length < 20) {
         return null;
     }
+
+    const client = new Client({
+        checkUpdate: false
+    } as any);
+
+    return new Promise((resolve) => {
+        let isResolved = false;
+
+        const cleanup = () => {
+            try {
+                client.destroy();
+            } catch (e) {}
+        };
+
+        const timeout = setTimeout(() => {
+            if (!isResolved) {
+                isResolved = true;
+                cleanup();
+                resolve(null);
+            }
+        }, 15000);
+
+        client.once('ready', () => {
+            if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                const user = client.user ? {
+                    id: client.user.id,
+                    username: client.user.username,
+                    discriminator: client.user.discriminator || '0',
+                    avatar: client.user.displayAvatarURL() || ''
+                } : null;
+                cleanup();
+                resolve(user);
+            }
+        });
+
+        client.login(cleanToken).catch(() => {
+            if (!isResolved) {
+                isResolved = true;
+                clearTimeout(timeout);
+                cleanup();
+                resolve(null);
+            }
+        });
+    });
 }

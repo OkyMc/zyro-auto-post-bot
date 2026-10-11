@@ -1,7 +1,8 @@
-import { Interaction, Collection } from 'discord.js';
+import { Interaction, Collection, MessageFlags } from 'discord.js';
 import { handleButton } from '../handlers/button.handler';
 import { handleModal } from '../handlers/modal.handler';
 import { handleSelect } from '../handlers/select.handler';
+import { PluginService } from '../services/plugin.service';
 import fs from 'fs';
 import path from 'path';
 import { Command } from '../interfaces/command';
@@ -27,6 +28,9 @@ if (fs.existsSync(commandsPath)) {
 
 export async function onInteractionCreate(interaction: Interaction) {
     try {
+        // Trigger custom plugin hooks for interactions
+        await PluginService.triggerOnInteraction(interaction);
+
         if (interaction.isChatInputCommand()) {
             const command = commands.get(interaction.commandName);
             if (!command) {
@@ -53,7 +57,7 @@ export async function onInteractionCreate(interaction: Interaction) {
         // Avoid double reply
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
             try {
-                await interaction.reply({ content: '❌ An error occurred.', ephemeral: true });
+                await interaction.reply({ content: '❌ An error occurred.', flags: MessageFlags.Ephemeral });
             } catch (ignored) {}
         }
     }

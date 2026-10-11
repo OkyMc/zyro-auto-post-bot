@@ -1,14 +1,26 @@
-import { Interaction } from 'discord.js';
+import { Interaction, MessageFlags, GuildMember, PermissionFlagsBits } from 'discord.js';
 import prisma from '../database/client';
 import { Logger } from './logger';
+import { config } from '../config';
 
 export async function validateOwnership(interaction: Interaction): Promise<boolean> {
     if (!interaction.isRepliable()) return false;
 
-    // 1. Allow Public Interactions (Store/Buy Buttons, Terms, Tutorial)
+    // 1. Allow Public Interactions & Admin Action Buttons
     // We check customId if available (Buttons, Modals, Selects)
     const customId = (interaction as any).customId;
-    if (customId && (customId.startsWith('btn_buy_') || customId === 'btn_view_terms' || customId === 'btn_view_tutorial' || customId.startsWith('btn_tutorial_'))) {
+    if (customId && (
+        customId.startsWith('btn_buy_') || 
+        customId === 'btn_view_terms' || 
+        customId === 'btn_view_tutorial' || 
+        customId.startsWith('btn_tutorial_') ||
+        customId.startsWith('btn_admin_') ||
+        customId === 'btn_order' ||
+        customId.startsWith('btn_confirm_buy_') ||
+        customId === 'select_order_plan' ||
+        customId.startsWith('btn_check_payment_') ||
+        customId.startsWith('btn_cancel_payment_')
+    )) {
         return true;
     }
 
@@ -22,24 +34,30 @@ export async function validateOwnership(interaction: Interaction): Promise<boole
             where: { workspaceChannelId: channelId }
         });
 
-        // If this is NOT a workspace channel, we might want to block dashboard buttons
-        // but allow other things. ideally dashboard buttons only exist in workspace.
+        // If this is NOT a workspace channel, block dashboard buttons
         if (!workspaceOwner) {
-            // It's not a workspace channel.
-            // If it's a dashboard button, block it.
-            if (customId && (customId.startsWith('btn_add_') || customId.startsWith('btn_setup_') || customId.startsWith('btn_view_'))) {
-                await interaction.reply({ content: '❌ This command can only be used inside a Workspace.', ephemeral: true });
+            if (customId && (customId.startsWith('btn_add_') || customId.startsWith('btn_setup_') || customId.startsWith('btn_view_') || customId.startsWith('btn_manage_') || customId.startsWith('btn_stop_'))) {
+                await interaction.reply({ content: '❌ This command can only be used inside a Workspace.', flags: MessageFlags.Ephemeral });
                 return false;
             }
             return true; // Allow other interactions in public channels
         }
 
-        // 3. Verify Ownership
+        // 3. Verify Ownership or Admin Override
+        const member = interaction.member as GuildMember | null;
+        const isAdmin = interaction.user.id === config.adminId || 
+                        (member && config.adminRoleId && member.roles.cache?.has(config.adminRoleId)) ||
+                        (member && member.permissions?.has(PermissionFlagsBits.Administrator));
+
+        if (isAdmin) {
+            return true; // Admin has full access to manage or interact
+        }
+
         if (workspaceOwner.id !== interaction.user.id) {
             Logger.warn(`Access Denied: User ${interaction.user.id} tried to use workspace of ${workspaceOwner.id}`);
             await interaction.reply({ 
                 content: '⛔ **Access Denied**\nThis dashboard belongs to another user.\nYou cannot interact with it.', 
-                ephemeral: true 
+                flags: MessageFlags.Ephemeral 
             });
             return false;
         }

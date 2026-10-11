@@ -1,84 +1,86 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "windows"]
 }
 
 datasource db {
-  provider = "mongodb"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id         String    @id @map("_id") // Discord User ID (Custom String ID)
-  username   String?
-  balance    Int       @default(0)
-  expiryDate DateTime?
-
+  id                    String    @id // Discord User Snowflake ID
+  username              String?
+  balance               Int       @default(0)
+  expiryDate            DateTime?
   workspaceChannelId    String?
   logThreadId           String?
-  controlPanelMessageId String? // New: Track Control Panel Message
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  controlPanelMessageId String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   accounts Account[]
   payments Payment[]
+
+  @@map("users")
 }
 
 model Account {
-  id     String  @id @default(auto()) @map("_id") @db.ObjectId
-  userId String
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token  String
-  name   String?
-  avatar String?
-
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @db.Text
+  name      String?
+  avatar    String?  @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   tasks Task[]
+
+  @@map("accounts")
 }
 
 model Task {
-  id        String  @id @default(auto()) @map("_id") @db.ObjectId
-  accountId String  @db.ObjectId
-  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-
+  id              String    @id @default(cuid())
+  accountId       String
+  account         Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   guildId         String
-  guildName       String? // New: Store Server Name
+  guildName       String?
   channelId       String
-  channelName     String? // New: Store Channel Name
-  channelSlowmode Int? // New: Store Slowmode
-  message         String
+  channelName     String?
+  channelSlowmode Int?
+  message         String    @db.Text
+  minDelay        Int
+  maxDelay        Int
+  dynamicDelay    Boolean   @default(true)
+  status          String    @default("STOPPED")
+  totalSent       Int       @default(0)
+  lastRun         DateTime?
+  nextRun         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  minDelay     Int
-  maxDelay     Int
-  dynamicDelay Boolean @default(true)
-
-  status String @default("STOPPED")
-
-  totalSent Int       @default(0)
-  lastRun   DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@map("tasks")
 }
 
 model Payment {
-  id         String @id @default(auto()) @map("_id") @db.ObjectId
-  externalId String @unique
-  userId     String
-  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+  id               String   @id @default(cuid())
+  externalId       String   @unique
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount           Int
   status           String
   invoiceMessageId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@map("payments")
 }
 
 model SystemConfig {
-  id             String  @id @map("_id") // "main"
+  id             String  @id // "main"
   statsChannelId String?
   statsMessageId String?
+
+  @@map("system_configs")
 }

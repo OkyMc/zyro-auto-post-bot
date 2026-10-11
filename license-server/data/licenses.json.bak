@@ -1,0 +1,17 @@
+[
+  {
+    "key": "ZYRO-D69835-FBD364-A54141",
+    "buyerName": "kristiansihaloho023",
+    "product": "Zyro Post Enterprise",
+    "status": "ACTIVE",
+    "days": 0,
+    "lockHwid": false,
+    "boundHwid": null,
+    "boundIp": "::ffff:172.19.0.12",
+    "createdAt": "2026-08-25T11:00:00.000Z",
+    "expiryDate": null,
+    "lastVerifiedAt": "2026-09-10T16:30:10.500Z",
+    "verifyCount": 2,
+    "lastIp": "::ffff:172.19.0.12"
+  }
+]

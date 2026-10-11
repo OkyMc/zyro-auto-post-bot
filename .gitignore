@@ -35,9 +35,9 @@ desktop.ini
 .idea/
 *.swp
 *.swo
-.project
-.classpath
-.settings/
+*.project
+*.classpath
+*.settings/
 
 # Testing
 coverage/
@@ -47,4 +47,5 @@ coverage/
 .eslintcache
 AGENTS.md
 .sisyphus/
-
+*.zip
+.zyro-hwid

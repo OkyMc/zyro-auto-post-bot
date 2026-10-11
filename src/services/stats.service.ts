@@ -43,7 +43,11 @@ export class StatsService {
             const view = await renderStats();
             
             // Only edit if content changed (though timestamp always changes, so it will edit)
-            await message.edit({ embeds: view.embeds });
+            await message.edit({
+                flags: (view as any).flags,
+                components: (view as any).components,
+                embeds: []
+            } as any);
 
         } catch (error) {
             Logger.error('Failed to auto-refresh Global Stats', error, 'StatsService');

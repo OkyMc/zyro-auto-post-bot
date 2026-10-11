@@ -2,6 +2,8 @@ import { WorkerGuild, WorkerChannel } from '../interfaces/worker';
 import { ButtonInteraction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { PaymentService } from '../services/payment.service';
 import { WorkerService } from '../services/worker.service';
+import { WorkspaceService } from '../services/workspace.service';
+import { AdminService } from '../services/admin.service';
 import { AccountService } from '../services/account.service';
 import { TaskService } from '../services/task.service';
 import { renderDashboard } from '../views/dashboard.view';
@@ -11,7 +13,7 @@ import { Logger } from '../utils/logger';
 import { validateOwnership, validateActiveSubscription } from '../utils/interactionGuard';
 import { decrypt } from '../utils/security';
 import { renderPaymentInvoice } from '../views/payment.view';
-import { PRODUCTS } from '../config';
+import { PRODUCTS, config } from '../config';
 import { renderAccountList, renderAccountDetail } from '../views/account.view';
 import { renderTerms } from '../views/store.view';
 import { renderTutorialMenu, renderTutorialPC, renderTutorialAndroid } from '../views/tutorial.view';
@@ -64,7 +66,7 @@ export async function handleButton(interaction: ButtonInteraction) {
         else if (customId === 'btn_view_tutorial') {
             const view = renderTutorialMenu();
             // Show ephemeral so they don't spam the chat if clicked from Store
-            await interaction.reply({ content: view.content || '', embeds: view.embeds, components: view.components, ephemeral: true });
+            await interaction.reply({ content: view.content || '', embeds: view.embeds, components: view.components, flags: MessageFlags.Ephemeral });
         }
 
         else if (customId === 'btn_tutorial_pc') {
@@ -77,24 +79,130 @@ export async function handleButton(interaction: ButtonInteraction) {
             await interaction.reply({ ...view } as any);
         }
 
-        // Step 1: Click "Buy" -> Show Terms & "I Understand" Button
-        else if (customId.startsWith('btn_buy_')) {
-            const productId = customId.replace('btn_buy_', '');
-            // Show Terms with Product ID context
-            const view = renderTerms(productId);
+        // Step 1: Click "Order" -> Tampilkan Pilihan Plan (Weekly / Monthly)
+        else if (customId === 'btn_order') {
+            const { renderOrderPlanSelection } = require('../views/store.view');
+            const view = renderOrderPlanSelection();
             await interaction.reply({ ...view } as any);
         }
 
-        // Step 2: Click "I Understand" -> Process Payment
+        // Admin Action: Approve Workspace via Button
+        else if (customId.startsWith('btn_admin_approve_')) {
+            // Format: btn_admin_approve_{userId}_{planId}
+            const parts = customId.replace('btn_admin_approve_', '').split('_');
+            const targetUserId = parts[0];
+            const planKey = parts.slice(1).join('_') || '30_DAYS';
+
+            const member = interaction.member as any;
+            const isAdmin = interaction.user.id === config.adminId || 
+                            (member && config.adminRoleId && member.roles.cache?.has(config.adminRoleId)) ||
+                            (member && member.permissions?.has?.(PermissionFlagsBits.Administrator));
+
+            if (!isAdmin) {
+                await interaction.reply({ content: '⛔ **Akses Ditolak!** Hanya Admin/Owner yang dapat meng-approve workspace ini.', flags: MessageFlags.Ephemeral });
+                return;
+            }
+
+            await interaction.deferUpdate();
+
+            const product = PRODUCTS[planKey] || PRODUCTS['7_DAYS'];
+            const days = product.durationDays || 7;
+
+            try {
+                const newExpiry = await WorkspaceService.approveWorkspace(
+                    interaction.client, 
+                    config.guildId || interaction.guildId || '', 
+                    targetUserId, 
+                    days, 
+                    interaction.user.tag
+                );
+
+                // Update invoice embed di message tombol ini
+                const oldEmbed = interaction.message.embeds[0];
+                const updatedEmbed = EmbedBuilder.from(oldEmbed || new EmbedBuilder())
+                    .setColor(0x57F287)
+                    .setTitle('✅ WORKSPACE TELAH DI-APPROVE')
+                    .setDescription(`Workspace milik <@${targetUserId}> telah disetujui oleh <@${interaction.user.id}>.\n📅 **Aktif Hingga:** \`${newExpiry.toLocaleString('id-ID')}\``);
+
+                await interaction.editReply({
+                    embeds: [updatedEmbed],
+                    components: [] // Hapus tombol approve
+                });
+            } catch (err: any) {
+                await interaction.followUp({ content: `❌ Gagal approve: ${err.message}`, flags: MessageFlags.Ephemeral });
+            }
+        }
+
+        // Admin Action: Reject / Delete Workspace via Button
+        else if (customId.startsWith('btn_admin_reject_')) {
+            const targetUserId = customId.replace('btn_admin_reject_', '');
+
+            const member = interaction.member as any;
+            const isAdmin = interaction.user.id === config.adminId || 
+                            (member && config.adminRoleId && member.roles.cache?.has(config.adminRoleId)) ||
+                            (member && member.permissions?.has?.(PermissionFlagsBits.Administrator));
+
+            if (!isAdmin) {
+                await interaction.reply({ content: '⛔ **Akses Ditolak!** Hanya Admin/Owner yang dapat menolak workspace ini.', flags: MessageFlags.Ephemeral });
+                return;
+            }
+
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+            try {
+                await AdminService.deleteWorkspace(targetUserId, interaction.client);
+                await interaction.editReply({ content: `🗑️ Workspace untuk <@${targetUserId}> telah dihapus.` });
+            } catch (err: any) {
+                await interaction.editReply({ content: `❌ Gagal menghapus workspace: ${err.message}` });
+            }
+        }
+
+        // Step 2: Click "I Understand" -> Process Payment or Direct Activation
         else if (customId.startsWith('btn_confirm_buy_')) {
             const productId = customId.replace('btn_confirm_buy_', '');
             
-            // Note: Since this is an interaction on an ephemeral message, we can't 'deferReply' again easily 
-            // if we want to send a NEW ephemeral message or edit. 
-            // But we want to send a DM. 'deferReply' works on button clicks.
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
             const product = PRODUCTS[productId];
+            const days = product ? product.durationDays : 30;
+
+            // Direct Activation Mode (No Payment Gateway)
+            if (!config.enablePayment) {
+                try {
+                    const now = new Date();
+                    const existingUser = await prisma.user.findUnique({ where: { id: interaction.user.id } });
+                    const baseDate = existingUser?.expiryDate && existingUser.expiryDate > now ? existingUser.expiryDate : now;
+                    const newExpiry = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
+
+                    await prisma.user.upsert({
+                        where: { id: interaction.user.id },
+                        update: {
+                            username: interaction.user.tag,
+                            expiryDate: newExpiry
+                        },
+                        create: {
+                            id: interaction.user.id,
+                            username: interaction.user.tag,
+                            expiryDate: newExpiry
+                        }
+                    });
+
+                    if (config.guildId) {
+                        const channel = await WorkspaceService.createWorkspace(interaction.client, config.guildId, interaction.user.id);
+                        await interaction.editReply({
+                            content: `🎉 **Akses Berhasil Diaktifkan!** (+${days} Hari)\nWorkspace privat lu udah siap di <#${channel?.id}>. Langsung cus ke channel tersebut buat tambah akun selfbot & atur jadwal pesan! 🔥`
+                        });
+                    } else {
+                        await interaction.editReply({ content: '❌ `GUILD_ID` belum disetting di `.env`.' });
+                    }
+                } catch (e: unknown) {
+                    const errorMessage = e instanceof Error ? e.message : String(e);
+                    Logger.error('Failed to create direct workspace', e, 'ButtonHandler');
+                    await interaction.editReply({ content: `❌ Gagal membuat workspace: ${errorMessage}` });
+                }
+                return;
+            }
+
             if (!product) {
                 await interaction.editReply({ content: '❌ Invalid Product.' });
                 return;
@@ -171,13 +279,13 @@ export async function handleButton(interaction: ButtonInteraction) {
                         components: [] // Remove buttons
                     });
                 } else if (status === 'CANCELLED') {
-                    await interaction.followUp({ content: 'Transaction was cancelled.', ephemeral: true });
+                    await interaction.followUp({ content: 'Transaction was cancelled.', flags: MessageFlags.Ephemeral });
                 } else {
-                    await interaction.followUp({ content: 'Status: PENDING. Please complete payment or wait a moment.', ephemeral: true });
+                    await interaction.followUp({ content: 'Status: PENDING. Please complete payment or wait a moment.', flags: MessageFlags.Ephemeral });
                 }
             } catch (e: unknown) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
-                await interaction.followUp({ content: `Check Failed: ${errorMessage}`, ephemeral: true });
+                await interaction.followUp({ content: `Check Failed: ${errorMessage}`, flags: MessageFlags.Ephemeral });
             }
         }
 
@@ -221,7 +329,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             } catch (e: unknown) {
                 const errorMessage = e instanceof Error ? e.message : String(e);
-                await interaction.followUp({ content: `Failed to cancel: ${errorMessage}`, ephemeral: true });
+                await interaction.followUp({ content: `Failed to cancel: ${errorMessage}`, flags: MessageFlags.Ephemeral });
             }
         }
 
@@ -307,7 +415,7 @@ export async function handleButton(interaction: ButtonInteraction) {
             if (!account) return;
 
             const token = AccountService.getDecryptedToken(account);
-            const guilds = await WorkerService.fetchGuilds(token);
+            const guilds = await WorkerService.fetchGuilds(token, accountId, interaction.user.id);
 
             const ITEMS_PER_PAGE = 25;
             const start = page * ITEMS_PER_PAGE;
@@ -373,18 +481,18 @@ export async function handleButton(interaction: ButtonInteraction) {
             const accountName = account.name || 'Unknown';
             const embed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:arrow:1306059259615903826> Server : *Select from dropdown*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+🔹 Server : *Select from dropdown*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${guilds.length}** servers (Page ${page + 1}/${totalPages})
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.editReply({
@@ -409,7 +517,7 @@ export async function handleButton(interaction: ButtonInteraction) {
             if (!account) return;
 
             const token = AccountService.getDecryptedToken(account);
-            const channels = await WorkerService.fetchChannels(token, guildId);
+            const channels = await WorkerService.fetchChannels(token, guildId, accountId, interaction.user.id);
 
             const ITEMS_PER_PAGE = 25;
             const start = page * ITEMS_PER_PAGE;
@@ -462,18 +570,18 @@ export async function handleButton(interaction: ButtonInteraction) {
             const accountName = account.name || 'Unknown';
             const embed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : *Selected*
-<a:arrow:1306059259615903826> Channel : *Select from dropdown*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+✅ Server : *Selected*
+🔹 Channel : *Select from dropdown*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${channels.length}** channels (Page ${page + 1}/${totalPages})
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.editReply({
@@ -533,16 +641,16 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             const embed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:arrow:1306059259615903826> Account : *Select from dropdown*
-<a:offline:1306203222263988285> Server : *Pending*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+🔹 Account : *Select from dropdown*
+⚪ Server : *Pending*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.editReply({
@@ -579,12 +687,12 @@ export async function handleButton(interaction: ButtonInteraction) {
             // Show loading first
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
-<a:loading_gif:1306062016611614741> *Loading accounts...*
+⏳ *Loading accounts...*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.update({
@@ -612,16 +720,16 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             const embed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:arrow:1306059259615903826> Account : *Select from dropdown*
-<a:offline:1306203222263988285> Server : *Pending*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+🔹 Account : *Select from dropdown*
+⚪ Server : *Pending*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.editReply({
@@ -642,7 +750,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             const account = await AccountService.getById(accountId);
             if (!account) {
-                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                await interaction.reply({ content: '❌ Account not found.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const accountName = account.name || 'Unknown';
@@ -650,16 +758,16 @@ export async function handleButton(interaction: ButtonInteraction) {
             // Show loading first
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:loading_gif:1306062016611614741> Server : *Fetching...*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+⏳ Server : *Fetching...*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.update({
@@ -670,7 +778,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             try {
                 const token = AccountService.getDecryptedToken(account);
-                const guilds = await WorkerService.fetchGuilds(token); // From CACHE
+                const guilds = await WorkerService.fetchGuilds(token, accountId, interaction.user.id);
                 
                 const ITEMS_PER_PAGE = 25;
                 const slicedGuilds = guilds.slice(0, ITEMS_PER_PAGE);
@@ -706,18 +814,18 @@ export async function handleButton(interaction: ButtonInteraction) {
 
                 const resultEmbed = new EmbedBuilder()
                     .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:arrow:1306059259615903826> Server : *Select from dropdown*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+🔹 Server : *Select from dropdown*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${guilds.length}** servers (Page 1/${totalPages})
 `)
                     .setColor(0x5865F2)
-                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setFooter({ text: 'Zyro Post' })
                     .setTimestamp();
 
                 await interaction.editReply({
@@ -743,7 +851,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             const account = await AccountService.getById(accountId);
             if (!account) {
-                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                await interaction.reply({ content: '❌ Account not found.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const accountName = account.name || 'Unknown';
@@ -751,16 +859,16 @@ export async function handleButton(interaction: ButtonInteraction) {
             // Show loading first
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : *Selected*
-<a:loading_gif:1306062016611614741> Channel : *Fetching...*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+✅ Server : *Selected*
+⏳ Channel : *Fetching...*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.update({
@@ -771,7 +879,7 @@ export async function handleButton(interaction: ButtonInteraction) {
 
             try {
                 const token = AccountService.getDecryptedToken(account);
-                const channels = await WorkerService.fetchChannels(token, guildId); // From CACHE
+                const channels = await WorkerService.fetchChannels(token, guildId, accountId, interaction.user.id);
 
                 if (channels.length === 0) {
                     await interaction.editReply({ content: '❌ No text channels found.', embeds: [], components: [] });
@@ -811,18 +919,18 @@ export async function handleButton(interaction: ButtonInteraction) {
 
                 const resultEmbed = new EmbedBuilder()
                     .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : *Selected*
-<a:arrow:1306059259615903826> Channel : *Select from dropdown*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+✅ Server : *Selected*
+🔹 Channel : *Select from dropdown*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${channels.length}** channels (Page 1/${totalPages})
 `)
                     .setColor(0x5865F2)
-                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setFooter({ text: 'Zyro Post' })
                     .setTimestamp();
 
                 await interaction.editReply({

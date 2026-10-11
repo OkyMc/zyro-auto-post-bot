@@ -1,26 +1,31 @@
 import { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuOptionBuilder } from 'discord.js';
 import { AccountService } from '../services/account.service';
 import { Logger } from '../utils/logger';
+import { ThemeService } from '../config/theme.config';
 
 export async function renderAccountList(userId: string) {
     try {
+        const theme = ThemeService.getTheme();
         const accounts = await AccountService.getByUserId(userId);
 
         const embed = new EmbedBuilder()
             .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **ACCOUNT MANAGER** <a:GREEN_CROWN:1306056562435035190>
+## ${theme.emojis.crown} **ACCOUNT MANAGER** ${theme.emojis.crown}
 \u200b
 **OVERVIEW**
-> <a:arrow:1306059259615903826> Connected Accounts : **${accounts.length}**
+> ${theme.emojis.bullet} Connected Accounts : **${accounts.length}**
 \u200b
 **YOUR ACCOUNTS**
-${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${acc.name || 'Unnamed'}** 
+${accounts.length > 0 ? accounts.map(acc => `${theme.emojis.bullet} **${acc.name || 'Unnamed'}** 
    ID: \`${acc.id.substring(0, 18)}...\``).join('\n') : '> *No accounts connected yet.*'}
 `)
-            .setColor(0x57F287)
-            .setFooter({ text: 'AutoPost | Powered by Frey' })
-            .setTimestamp()
-            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05');
+            .setColor(ThemeService.parseColor(theme.colors.success))
+            .setFooter({ text: theme.branding.footerText })
+            .setTimestamp();
+
+        if (theme.branding.bannerUrl) {
+            embed.setImage(theme.branding.bannerUrl);
+        }
 
         const components: ActionRowBuilder<StringSelectMenuBuilder | ButtonBuilder>[] = [];
 
@@ -35,6 +40,7 @@ ${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${a
                         .setLabel(acc.name || 'Unnamed Account')
                         .setValue(acc.id)
                         .setDescription(`ID: ${acc.id.substring(0, 10)}...`)
+                        .setEmoji('👤')
                 );
             });
 
@@ -48,10 +54,12 @@ ${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${a
                 new ButtonBuilder()
                     .setCustomId('btn_back_menu')
                     .setLabel('Back to Menu')
+                    .setEmoji('⬅️')
                     .setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder()
                     .setCustomId('btn_add_account')
                     .setLabel('Add New Account')
+                    .setEmoji(theme.emojis.add)
                     .setStyle(ButtonStyle.Primary)
             );
 
@@ -70,6 +78,7 @@ ${accounts.length > 0 ? accounts.map(acc => `<a:arrow:1306059259615903826> **${a
 
 export async function renderAccountDetail(accountId: string, status?: { isValid: boolean, username?: string }) {
     try {
+        const theme = ThemeService.getTheme();
         const account = await AccountService.getById(accountId);
 
         if (!account) {
@@ -81,46 +90,51 @@ export async function renderAccountDetail(accountId: string, status?: { isValid:
         }
 
         // Determine status display with emoji
-        let statusDisplay = '<a:arrow:1306059259615903826> Status : **Unknown** *(Click Check Status)*';
-        let statusColor = 0x5865F2;
+        let statusDisplay = `${theme.emojis.bullet} Status : **Unknown** *(Click Check Status)*`;
+        let statusColor = ThemeService.parseColor(theme.colors.primary);
 
         if (status) {
             if (status.isValid) {
-                statusDisplay = `<a:Tick_green:1306061558303952937> Status : **Valid** *(Logged in as ${status.username})*`;
-                statusColor = 0x57F287;
+                statusDisplay = `${theme.emojis.success} Status : **Valid** *(Logged in as ${status.username})*`;
+                statusColor = ThemeService.parseColor(theme.colors.success);
             } else {
-                statusDisplay = `<a:alert:1306298772124336178> Status : **Invalid** *(Token expired or flagged)*`;
-                statusColor = 0xED4245;
+                statusDisplay = `⚠️ Status : **Invalid** *(Token expired or flagged)*`;
+                statusColor = ThemeService.parseColor(theme.colors.danger);
             }
         }
 
         const embed = new EmbedBuilder()
             .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **MANAGE ACCOUNT** <a:GREEN_CROWN:1306056562435035190>
+## ${theme.emojis.crown} **MANAGE ACCOUNT** ${theme.emojis.crown}
 \u200b
 **ACCOUNT INFO**
-<a:arrow:1306059259615903826> Name : **${account.name}**
-<a:arrow:1306059259615903826> ID : \`${account.id}\`
-<a:arrow:1306059259615903826> Added : <t:${Math.floor(account.createdAt.getTime() / 1000)}:R>
+${theme.emojis.bullet} Name : **${account.name}**
+${theme.emojis.bullet} ID : \`${account.id}\`
+${theme.emojis.bullet} Added : <t:${Math.floor(account.createdAt.getTime() / 1000)}:R>
 \u200b
 **TOKEN STATUS**
 ${statusDisplay}
 `)
             .setColor(statusColor)
             .setThumbnail(account.avatar ? `https://cdn.discordapp.com/avatars/${account.id}/${account.avatar}.png` : null)
-            .setFooter({ text: 'AutoPost | Powered by Frey' })
-            .setTimestamp()
-            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05');
+            .setFooter({ text: theme.branding.footerText })
+            .setTimestamp();
+
+        if (theme.branding.bannerUrl) {
+            embed.setImage(theme.branding.bannerUrl);
+        }
 
         // Build buttons dynamically
         const buttons: ButtonBuilder[] = [
             new ButtonBuilder()
                 .setCustomId('btn_account_back')
                 .setLabel('Back to List')
+                .setEmoji('⬅️')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId(`btn_check_account_${account.id}`)
                 .setLabel('Check Status')
+                .setEmoji('🔍')
                 .setStyle(ButtonStyle.Primary)
         ];
 
@@ -130,6 +144,7 @@ ${statusDisplay}
                 new ButtonBuilder()
                     .setCustomId(`btn_update_token_${account.id}`)
                     .setLabel('Update Token')
+                    .setEmoji('🔄')
                     .setStyle(ButtonStyle.Success)
             );
         }
@@ -139,6 +154,7 @@ ${statusDisplay}
             new ButtonBuilder()
                 .setCustomId(`btn_delete_account_${account.id}`)
                 .setLabel('Delete Account')
+                .setEmoji('🗑️')
                 .setStyle(ButtonStyle.Danger)
         );
 

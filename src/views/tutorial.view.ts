@@ -1,35 +1,47 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { ThemeService } from '../config/theme.config';
+import { PluginService } from '../services/plugin.service';
 
 const GET_TOKEN_SCRIPT = `window.webpackChunkdiscord_app.push([[Symbol()],{},o=>{for(let e of Object.values(o.c))try{if(!e.exports||e.exports===window)continue;e.exports?.getToken&&(token=e.exports.getToken());for(let o in e.exports)e.exports?.[o]?.getToken&&"IntlMessagesProxy"!==e.exports[o][Symbol.toStringTag]&&(token=e.exports[o].getToken())}catch{}}]),window.webpackChunkdiscord_app.pop(),token;`;
 
 export function renderTutorialMenu() {
+    const customRenderer = PluginService.getViewOverride('tutorial');
+    if (customRenderer) {
+        return customRenderer();
+    }
+
+    const theme = ThemeService.getTheme();
+
     const embed = new EmbedBuilder()
-        .setTitle('<a:key:1306062112329568306> **HOW TO GET DISCORD TOKEN** <a:key:1306062112329568306>')
+        .setTitle(`🔑 **${theme.ui.tutorialTitle}** 🔑`)
         .setDescription(`
-**Please select your device:**
+**Pilih panduan sesuai device lu:**
 
-<a:arrow:1306059259615903826> **PC / Laptop**
-Recommended method using Google Chrome or Edge browser.
+${theme.emojis.bullet} **PC / Laptop (Chrome / Edge)**
+Metode tercepat menggunakan Developer Console atau Network Tab.
 
-<a:arrow:1306059259615903826> **Android / Mobile**
-Requires **Kiwi Browser** or **Yandex Browser** (Browsers that support Developer Console).
+${theme.emojis.bullet} **Android / Mobile (Kiwi Browser)**
+Menggunakan Kiwi Browser atau Yandex Browser yang support Developer Tools.
 
-<a:alert:1306298772124336178> **SECURITY WARNING**
-Your Token is your account password. **NEVER** share it with anyone else. We encrypt it for safety, but you must keep it secret.
+⚠️ **PENTING (WAJIB DIBACA):**
+1. **Wajib LOGIN DULU** sampai masuk ke dalam Discord (halaman chat/server).
+2. **JANGAN** jalankan script di halaman login (\`discord.com/login\`), karena token yang keluar adalah token mati/expired!
 `)
-        .setColor(0x5865F2)
-        .setFooter({ text: 'AutoPost | Powered by Frey' })
+        .setColor(ThemeService.parseColor(theme.colors.primary))
+        .setFooter({ text: theme.branding.footerText })
         .setTimestamp();
 
     const row = new ActionRowBuilder<ButtonBuilder>()
         .addComponents(
             new ButtonBuilder()
                 .setCustomId('btn_tutorial_pc')
-                .setLabel('💻 PC / Laptop')
+                .setLabel('PC / Laptop')
+                .setEmoji('💻')
                 .setStyle(ButtonStyle.Primary),
             new ButtonBuilder()
                 .setCustomId('btn_tutorial_android')
-                .setLabel('📱 Android')
+                .setLabel('Android')
+                .setEmoji('📱')
                 .setStyle(ButtonStyle.Success)
         );
 
@@ -37,43 +49,47 @@ Your Token is your account password. **NEVER** share it with anyone else. We enc
 }
 
 export function renderTutorialPC() {
+    const theme = ThemeService.getTheme();
+
     const embed = new EmbedBuilder()
-        .setTitle('<a:GREEN_CROWN:1306056562435035190> **PC: Get Token Guide** <a:GREEN_CROWN:1306056562435035190>')
+        .setTitle('👑 **PC: Panduan Ambil Token Discord** 👑')
         .setDescription(`
-<a:arrow:1306059259615903826> Open **Discord** in your browser (Chrome/Edge).
-<a:arrow:1306059259615903826> Press \`Ctrl + Shift + I\` to open Developer Tools.
-<a:arrow:1306059259615903826> Click on the **"Console"** tab.
-<a:arrow:1306059259615903826> **Paste** the code below and press **Enter**.
-<a:arrow:1306059259615903826> Your token will appear (text inside quotes \`"..."\`).
+1. Buka **Discord Web** di Chrome/Edge (\`discord.com/app\`).
+2. **LOGIN** pake Email & Password lu sampai bener-bener **MASUK KE DALAM CHAT/SERVER**.
+3. Tekan \`Ctrl + Shift + I\` untuk membuka Developer Tools.
+4. Klik tab **"Console"**.
+5. **Paste** script di bawah dan tekan **Enter**.
+6. Token baru lu yang valid bakal muncul (teks di dalam tanda kutip \`"..."\`).
 `)
-        .setColor(0x5865F2);
+        .setColor(ThemeService.parseColor(theme.colors.primary));
 
     return { 
         content: `\`\`\`js\n${GET_TOKEN_SCRIPT}\n\`\`\``, 
         embeds: [embed], 
         components: [],
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
     };
 }
 
 export function renderTutorialAndroid() {
-    const embed = new EmbedBuilder()
-        .setTitle('<a:GREEN_CROWN:1306056562435035190> **Android: Get Token Guide** <a:GREEN_CROWN:1306056562435035190>')
-        .setDescription(`
-**Note:** The official Chrome mobile app does NOT support Console. You need **Kiwi Browser** (PlayStore).
+    const theme = ThemeService.getTheme();
 
-<a:arrow:1306059259615903826> Install & Open **Kiwi Browser**.
-<a:arrow:1306059259615903826> Login to **Discord Web** (discord.com/login).
-<a:arrow:1306059259615903826> Click the **3 dots** (Menu) -> Select **Developer Tools**.
-<a:arrow:1306059259615903826> Go to the **Console** tab.
-<a:arrow:1306059259615903826> **Paste** the code below and press enter.
+    const embed = new EmbedBuilder()
+        .setTitle('👑 **Android: Panduan Ambil Token Discord** 👑')
+        .setDescription(`
+1. Install & Buka **Kiwi Browser** dari PlayStore.
+2. Buka **Discord Web** (\`discord.com/login\`) dan **LOGIN** sampai masuk ke halaman chat.
+3. Klik tombol **Titik 3** (Menu) -> Pilih **Developer Tools**.
+4. Masuk ke tab **Console**.
+5. **Paste** script di bawah dan tekan **Enter**.
+6. Salin token aktif yang muncul.
 `)
-        .setColor(0x57F287);
+        .setColor(ThemeService.parseColor(theme.colors.success));
 
     return { 
         content: `\`\`\`js\n${GET_TOKEN_SCRIPT}\n\`\`\``, 
         embeds: [embed], 
         components: [],
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
     };
 }

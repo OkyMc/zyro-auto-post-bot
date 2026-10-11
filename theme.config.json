@@ -1,0 +1,39 @@
+{
+  "branding": {
+    "name": "Zyro Post",
+    "logoUrl": "https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif",
+    "bannerUrl": "https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif",
+    "footerText": "Zyro Post • Enterprise Discord Auto Post",
+    "website": "https://zyro.host"
+  },
+  "colors": {
+    "primary": "#5865F2",
+    "success": "#57F287",
+    "warning": "#FEE75C",
+    "danger": "#ED4245",
+    "info": "#3498DB",
+    "dark": "#2B2D31"
+  },
+  "emojis": {
+    "active": "🟢",
+    "inactive": "🔴",
+    "pending": "⏳",
+    "crown": "👑",
+    "bullet": "🔹",
+    "gear": "⚙️",
+    "add": "➕",
+    "stop": "⏹️",
+    "server": "🌐",
+    "clock": "⏱️",
+    "money": "💳",
+    "success": "✅",
+    "error": "❌"
+  },
+  "ui": {
+    "dashboardTitle": "TASK MANAGER",
+    "controlPanelTitle": "ZYRO POST PANEL",
+    "storeTitle": "ZYRO POST STORE",
+    "tutorialTitle": "PANDUAN MENGAMBIL USER TOKEN",
+    "statsTitle": "SYSTEM LIVE STATISTICS"
+  }
+}

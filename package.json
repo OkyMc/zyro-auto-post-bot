@@ -1,12 +1,23 @@
 {
-  "name": "discord-saas-manager",
+  "name": "zyro-post",
   "version": "1.0.0",
-  "description": "Enterprise SaaS Manager for Discord Selfbots",
+  "description": "Zyro Post - Enterprise Discord Auto Post & Message Scheduler",
   "main": "dist/index.js",
-"scripts": {
+  "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
+    "build:protected": "tsc && node scripts/build-protected.js",
+    "pack:client": "npm run build:protected && node scripts/pack-client.js",
+    "license": "node license-server/cli.js",
     "start": "node dist/index.js",
+    "pm2:start": "npx pm2 start ecosystem.config.js",
+    "pm2:stop": "npx pm2 stop zyro-post",
+    "pm2:restart": "npx pm2 restart zyro-post",
+    "pm2:logs": "npx pm2 logs zyro-post",
+    "pm2:status": "npx pm2 status",
+    "pm2:monit": "npx pm2 monit",
+    "pm2:delete": "npx pm2 delete zyro-post",
+    "pm2:save": "npx pm2 save",
     "deploy": "ts-node src/scripts/deploy-commands.ts",
     "lint": "eslint src/**/*.ts",
     "db:push": "npx prisma db push",
@@ -22,11 +33,14 @@
     "discord.js": "^14.14.1",
     "discord.js-selfbot-v13": "^3.7.1",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "mongodb": "^7.5.0",
+    "pm2": "^7.0.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.4",
+    "javascript-obfuscator": "^5.6.0",
     "nodemon": "^3.0.2",
     "prisma": "^5.7.0",
     "ts-node": "^10.9.2",

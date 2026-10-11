@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
 import { Command } from '../interfaces/command';
 import { config } from '../config';
 import { renderStore } from '../views/store.view';
@@ -11,7 +11,7 @@ export const storeCommand: Command = {
 
     execute: async (interaction) => {
         if (interaction.user.id !== config.adminId) {
-            await interaction.reply({ content: '⛔ Admin only.', ephemeral: true });
+            await interaction.reply({ content: '⛔ Admin only.', flags: MessageFlags.Ephemeral });
             return;
         }
     
@@ -19,10 +19,14 @@ export const storeCommand: Command = {
         
         // We send to channel, not reply, so it stays
         if (interaction.channel && interaction.channel.isSendable()) {
-            await interaction.channel.send({ embeds: storeView.embeds, components: storeView.components });
-            await interaction.reply({ content: '✅ Store Deployed!', ephemeral: true });
+            await interaction.channel.send({
+                flags: (storeView as any).flags,
+                components: (storeView as any).components,
+                embeds: []
+            } as any);
+            await interaction.reply({ content: '✅ Store Deployed!', flags: MessageFlags.Ephemeral });
         } else {
-            await interaction.reply({ content: '❌ Cannot send messages here.', ephemeral: true });
+            await interaction.reply({ content: '❌ Cannot send messages here.', flags: MessageFlags.Ephemeral });
         }
     }
 };

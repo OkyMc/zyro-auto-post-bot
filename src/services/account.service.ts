@@ -1,13 +1,14 @@
 import { Account } from '@prisma/client';
 import prisma from '../database/client';
-import { encrypt, decrypt } from '../utils/security';
+import { encrypt, decrypt, sanitizeToken } from '../utils/security';
 import { Logger } from '../utils/logger';
 import { WorkerService } from './worker.service';
 
 export class AccountService {
     static async create(userId: string, name: string, token: string, avatar: string) {
         try {
-            const encryptedToken = encrypt(token);
+            const cleanToken = sanitizeToken(token);
+            const encryptedToken = encrypt(cleanToken);
             const account = await prisma.account.create({
                 data: {
                     userId,
@@ -43,7 +44,7 @@ export class AccountService {
     }
 
     static getDecryptedToken(account: Account): string {
-        return decrypt(account.token);
+        return sanitizeToken(decrypt(account.token));
     }
 
     static async delete(accountId: string) {
@@ -61,7 +62,8 @@ export class AccountService {
 
     static async updateToken(accountId: string, newToken: string, name?: string, avatar?: string) {
         try {
-            const encryptedToken = encrypt(newToken);
+            const cleanToken = sanitizeToken(newToken);
+            const encryptedToken = encrypt(cleanToken);
             const account = await prisma.account.update({
                 where: { id: accountId },
                 data: { 

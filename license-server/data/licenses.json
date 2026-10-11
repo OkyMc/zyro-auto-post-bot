@@ -1,0 +1,36 @@
+[
+  {
+    "key": "ZYRO-D69835-FBD364-A54141",
+    "buyerName": "kristiansihaloho023",
+    "product": "Zyro Post Enterprise",
+    "status": "ACTIVE",
+    "days": 0,
+    "lockHwid": true,
+    "boundHwid": "65befd9e0688962d25da0d6dd2c988c6d0107ffa7dae9994b02fa65938b5a3eb",
+    "boundIp": "::ffff:172.19.0.18",
+    "createdAt": "2026-08-25T11:00:00.000Z",
+    "expiryDate": null,
+    "lastVerifiedAt": "2026-10-11T18:16:13.018Z",
+    "verifyCount": 1263,
+    "lastIp": "::ffff:172.19.0.6",
+    "boundPteroUuid": "4c0ad078-e990-488c-a0f0-b2d379abdd15",
+    "platform": "pterodactyl"
+  },
+  {
+    "key": "ZYRO-8C10F6-9334EA-26F547",
+    "buyerName": "wirra",
+    "product": "Zyro Post Standard",
+    "status": "ACTIVE",
+    "days": 365,
+    "lockHwid": true,
+    "boundHwid": "d326320babc226c842dd2b4612df6a362dc1f4431afa14fc783fd31a6bc68b3c",
+    "boundPteroUuid": "3c2d1c78-a6da-4550-9cfd-57460079dd22",
+    "platform": "pterodactyl",
+    "boundIp": "::ffff:45.13.237.240",
+    "createdAt": "2026-09-21T14:57:39.045Z",
+    "expiryDate": "2027-09-21T14:57:39.044Z",
+    "lastVerifiedAt": "2026-10-02T14:07:49.393Z",
+    "verifyCount": 111,
+    "lastIp": "::ffff:45.13.237.240"
+  }
+]

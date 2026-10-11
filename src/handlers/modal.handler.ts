@@ -1,4 +1,4 @@
-import { ModalSubmitInteraction, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ModalSubmitInteraction, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { validateToken } from '../utils/discordHelper';
 import { WorkerService } from '../services/worker.service';
 import { AccountService } from '../services/account.service';
@@ -7,12 +7,12 @@ import { Logger } from '../utils/logger';
 import { validateOwnership } from '../utils/interactionGuard';
 import { renderTaskPanel } from '../views/task.view';
 import { renderAccountDetail } from '../views/account.view';
-import { decrypt } from '../utils/security';
+import { decrypt, sanitizeToken } from '../utils/security';
 import { WorkerGuild } from '../interfaces/worker';
 
 // Konstanta validasi delay
 const MAX_DELAY_MS = 86400000; // 24 hours in milliseconds
-const MIN_DELAY_MS = 3000; // 3 seconds in milliseconds
+const MIN_DELAY_MS = 30000; // 30 seconds minimum safe delay
 
 export async function handleModal(interaction: ModalSubmitInteraction) {
     // Security Check
@@ -24,19 +24,20 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
     try {
         // ==================== ADD ACCOUNT MODAL ====================
         if (customId === 'modal_add_account') {
-            const token = interaction.fields.getTextInputValue('token_input');
+            const rawToken = interaction.fields.getTextInputValue('token_input');
+            const cleanToken = sanitizeToken(rawToken);
             const name = interaction.fields.getTextInputValue('name_input');
             
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-            const discordUser = await validateToken(token);
+            const discordUser = await validateToken(cleanToken);
             
             if (!discordUser) {
                 await interaction.editReply({ content: '❌ Invalid Discord Token. Please check and try again.' });
                 return;
             }
 
-            await AccountService.create(interaction.user.id, name, token, discordUser.avatar);
+            await AccountService.create(interaction.user.id, name, cleanToken, discordUser.avatar);
             await interaction.editReply({ content: `✅ Account **${name}** (Connected as ${discordUser.username}) added successfully!` });
         }
 
@@ -48,7 +49,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
             // Get account name for display
             const account = await AccountService.getById(accountId);
             if (!account) {
-                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                await interaction.reply({ content: '❌ Account not found.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const accountName = account.name || 'Unknown';
@@ -59,41 +60,41 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
             // Show loading embed on the SAME message
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:loading_gif:1306062016611614741> Server : *Searching "${query}"...*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+⏳ Server : *Searching "${query}"...*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.editReply({ embeds: [loadingEmbed], components: [] });
 
             try {
                 const token = AccountService.getDecryptedToken(account);
-                const guilds = await WorkerService.fetchGuilds(token);
+                const guilds = await WorkerService.fetchGuilds(token, accountId, interaction.user.id);
                 
                 const filtered = guilds.filter((g: WorkerGuild) => g.name.toLowerCase().includes(query)).slice(0, 25);
 
                 if (filtered.length === 0) {
                     const noResultEmbed = new EmbedBuilder()
                         .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:alert:1306298772124336178> Server : *No results for "${query}"*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+⚠️ Server : *No results for "${query}"*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 \u200b
 > No servers found. Try a different search term.
 `)
                         .setColor(0xED4245)
-                        .setFooter({ text: 'AutoPost | Powered by Frey' })
+                        .setFooter({ text: 'Zyro Post' })
                         .setTimestamp();
 
                     // Add back the search button so user can try again
@@ -120,18 +121,18 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
                 const resultEmbed = new EmbedBuilder()
                     .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:arrow:1306059259615903826> Server : *Select from dropdown*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+🔹 Server : *Select from dropdown*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 \u200b
-<a:arrow:1306059259615903826> Search : **"${query}"** → Found **${filtered.length}** server${filtered.length > 1 ? 's' : ''}
+🔹 Search : **"${query}"** → Found **${filtered.length}** server${filtered.length > 1 ? 's' : ''}
 `)
                     .setColor(0x57F287)
-                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setFooter({ text: 'Zyro Post' })
                     .setTimestamp();
 
                 const buttonRow = new ActionRowBuilder<ButtonBuilder>()
@@ -181,31 +182,31 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
                 // Validasi format
                 if (isNaN(minDelay) || isNaN(maxDelay)) {
-                    await interaction.followUp({ content: '❌ Invalid delay format. Use format: min-max (e.g., 10-30)', ephemeral: true });
+                    await interaction.followUp({ content: '❌ Invalid delay format. Use format: min-max (e.g., 10-30)', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
-                // Validasi: minimum delay 3 detik
+                // Validasi: minimum delay 30 detik
                 if (minDelay < MIN_DELAY_MS) {
-                    await interaction.followUp({ content: '❌ **Invalid!** Min delay must be at least 3 seconds.', ephemeral: true });
+                    await interaction.followUp({ content: '❌ **Invalid!** Min delay must be at least 30 seconds for account safety.', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
                 // Validasi: minDelay harus >= slowmode
                 if (minDelay < slowmode * 1000) {
-                    await interaction.followUp({ content: `❌ **Unsafe!** Min delay must be >= ${slowmode}s (channel slowmode).`, ephemeral: true });
+                    await interaction.followUp({ content: `❌ **Unsafe!** Min delay must be >= ${slowmode}s (channel slowmode).`, flags: MessageFlags.Ephemeral });
                     return;
                 }
 
                 // Validasi: minDelay tidak boleh > maxDelay
                 if (minDelay > maxDelay) {
-                    await interaction.followUp({ content: '❌ **Invalid!** Min delay cannot be greater than max delay.', ephemeral: true });
+                    await interaction.followUp({ content: '❌ **Invalid!** Min delay cannot be greater than max delay.', flags: MessageFlags.Ephemeral });
                     return;
                 }
 
                 // Validasi: maxDelay tidak boleh melebihi 24 jam
                 if (maxDelay > MAX_DELAY_MS) {
-                    await interaction.followUp({ content: '❌ **Invalid!** Max delay cannot exceed 24 hours (86400 seconds).', ephemeral: true });
+                    await interaction.followUp({ content: '❌ **Invalid!** Max delay cannot exceed 24 hours (86400 seconds).', flags: MessageFlags.Ephemeral });
                     return;
                 }
             }
@@ -233,7 +234,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                 const account = await AccountService.getById(accountId);
                 if (account) {
                     const token = decrypt(account.token);
-                    const context = await WorkerService.fetchContext(token, guildId, channelId);
+                    const context = await WorkerService.fetchContext(token, guildId, channelId, accountId, interaction.user.id);
                     guildName = context.guildName;
                     channelName = context.channelName;
                 }
@@ -311,25 +312,25 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
 
             // Validasi format
             if (isNaN(minDelay) || isNaN(maxDelay)) {
-                await interaction.followUp({ content: '❌ Invalid delay format. Use format: min-max (e.g., 10-30)', ephemeral: true });
+                await interaction.followUp({ content: '❌ Invalid delay format. Use format: min-max (e.g., 10-30)', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Validasi: minDelay tidak boleh > maxDelay
             if (minDelay > maxDelay) {
-                await interaction.followUp({ content: '❌ **Invalid!** Min delay cannot be greater than max delay.', ephemeral: true });
+                await interaction.followUp({ content: '❌ **Invalid!** Min delay cannot be greater than max delay.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
             // Validasi: maxDelay tidak boleh melebihi 24 jam
             if (maxDelay > MAX_DELAY_MS) {
-                await interaction.followUp({ content: '❌ **Invalid!** Max delay cannot exceed 24 hours (86400 seconds).', ephemeral: true });
+                await interaction.followUp({ content: '❌ **Invalid!** Max delay cannot exceed 24 hours (86400 seconds).', flags: MessageFlags.Ephemeral });
                 return;
             }
 
-            // Validasi: minimum delay 3 detik
+            // Validasi: minimum delay 30 detik
             if (minDelay < MIN_DELAY_MS) {
-                await interaction.followUp({ content: '❌ **Invalid!** Min delay must be at least 3 seconds.', ephemeral: true });
+                await interaction.followUp({ content: '❌ **Invalid!** Min delay must be at least 30 seconds.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -340,7 +341,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
                 if (minDelay < slowmodeMs) {
                     await interaction.followUp({ 
                         content: `❌ **Unsafe!** Min delay must be >= ${existingTask.channelSlowmode}s (channel slowmode).`, 
-                        ephemeral: true 
+                        flags: MessageFlags.Ephemeral 
                     });
                     return;
                 }
@@ -370,22 +371,23 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         // ==================== UPDATE TOKEN MODAL ====================
         else if (customId.startsWith('modal_update_token_')) {
             const accountId = customId.replace('modal_update_token_', '');
-            const newToken = interaction.fields.getTextInputValue('new_token_input');
+            const rawNewToken = interaction.fields.getTextInputValue('new_token_input');
+            const cleanNewToken = sanitizeToken(rawNewToken);
             
             await interaction.deferUpdate();
             
             // Validate new token
-            const discordUser = await validateToken(newToken);
+            const discordUser = await validateToken(cleanNewToken);
             if (!discordUser) {
                 await interaction.followUp({ 
                     content: '❌ Invalid token. Please check and try again.', 
-                    ephemeral: true 
+                    flags: MessageFlags.Ephemeral 
                 });
                 return;
             }
             
             // Update in database (encrypted)
-            await AccountService.updateToken(accountId, newToken, discordUser.username, discordUser.avatar);
+            await AccountService.updateToken(accountId, cleanNewToken, discordUser.username, discordUser.avatar);
             
             // Refresh embed in SAME message with new status
             const view = await renderAccountDetail(accountId, { 
@@ -400,7 +402,7 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         else {
             Logger.warn(`Unhandled modal customId: ${customId}`, 'ModalHandler');
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: '❌ Unknown action.', ephemeral: true });
+                await interaction.reply({ content: '❌ Unknown action.', flags: MessageFlags.Ephemeral });
             }
         }
 
@@ -410,9 +412,9 @@ export async function handleModal(interaction: ModalSubmitInteraction) {
         // Fallback error response
         try {
             if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: '❌ An error occurred while processing your request.', ephemeral: true });
+                await interaction.reply({ content: '❌ An error occurred while processing your request.', flags: MessageFlags.Ephemeral });
             } else {
-                await interaction.followUp({ content: '❌ An error occurred while processing your request.', ephemeral: true });
+                await interaction.followUp({ content: '❌ An error occurred while processing your request.', flags: MessageFlags.Ephemeral });
             }
         } catch (e) {
             // Ignore if we can't send error message

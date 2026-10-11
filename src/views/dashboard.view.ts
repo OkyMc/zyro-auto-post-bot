@@ -2,10 +2,20 @@ import { EmbedBuilder, StringSelectMenuBuilder, ActionRowBuilder, ButtonBuilder,
 import { TaskService } from '../services/task.service';
 import { formatDuration } from '../utils/timeHelper';
 import { Logger } from '../utils/logger';
+import { ThemeService } from '../config/theme.config';
+import { PluginService } from '../services/plugin.service';
 
 export async function renderDashboard(userId: string) {
     try {
-        // 1. Fetch User's Tasks dengan account details via Service
+        // 1. Check if user has registered a custom view override in custom/
+        const customRenderer = PluginService.getViewOverride('dashboard');
+        if (customRenderer) {
+            return await customRenderer(userId);
+        }
+
+        const theme = ThemeService.getTheme();
+
+        // 2. Fetch User's Tasks dengan account details via Service
         const tasks = await TaskService.getTasksByUserWithDetails(userId);
 
         if (tasks.length === 0) {
@@ -13,7 +23,8 @@ export async function renderDashboard(userId: string) {
                 .addComponents(
                     new ButtonBuilder()
                         .setCustomId('btn_back_menu')
-                        .setLabel('⬅️ Back to Menu')
+                        .setLabel('Back to Menu')
+                        .setEmoji('⬅️')
                         .setStyle(ButtonStyle.Secondary)
                 );
 
@@ -24,37 +35,39 @@ export async function renderDashboard(userId: string) {
             };
         }
 
-        // 2. Build Embed
+        // 3. Build Embed using Theme
         const activeCount = tasks.filter(t => t.status === 'RUNNING').length;
         const inactiveCount = tasks.length - activeCount;
 
         const embed = new EmbedBuilder()
             .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK MANAGER** <a:GREEN_CROWN:1306056562435035190>
+## ${theme.emojis.crown} **${theme.ui.dashboardTitle}** ${theme.emojis.crown}
 \u200b
 **PROCESS OVERVIEW**
-> <a:on:1306062154616537109> Active Workers : **${activeCount}**
-> <a:offline:1306203222263988285> Inactive Workers : **${inactiveCount}**
-> <a:arrow:1306059259615903826> Total Workers  : **${tasks.length}**
+> ${theme.emojis.active} Active Workers : **${activeCount}**
+> ${theme.emojis.inactive} Inactive Workers : **${inactiveCount}**
+> ${theme.emojis.bullet} Total Workers  : **${tasks.length}**
 \u200b
 `)
-            .setColor(0x57F287)
-            .setFooter({ text: 'AutoPost | Powered by Frey' })
-            .setTimestamp()
-            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
+            .setColor(ThemeService.parseColor(theme.colors.success))
+            .setFooter({ text: theme.branding.footerText })
+            .setTimestamp();
+
+        if (theme.branding.bannerUrl) {
+            embed.setImage(theme.branding.bannerUrl);
+        }
 
         const selectMenu = new StringSelectMenuBuilder()
             .setCustomId('select_manage_task')
             .setPlaceholder('Select a task to configure');
 
-        // Limit to 10 tasks (25 fields limit / 1 field per task = 25 tasks, but let's keep it clean)
+        // Limit to 10 tasks (25 fields limit)
         const displayTasks = tasks.slice(0, 10);
 
-        displayTasks.forEach((task, index) => {
+        displayTasks.forEach((task) => {
             const isRunning = task.status === 'RUNNING';
-            const statusIcon = isRunning ? '<a:on:1306062154616537109>' : '<a:offline:1306203222263988285>';
+            const statusIcon = isRunning ? theme.emojis.active : theme.emojis.inactive;
             const accountName = task.account?.name || 'Unnamed';
-            // Use guildName/channelName from DB if available, fallback to ID
             const guildDisplay = task.guildName || 'Unknown Server';
             const channelDisplay = task.channelName ? `#${task.channelName}` : `<#${task.channelId}>`;
             const slowmodeDisplay = task.channelSlowmode ? `(${task.channelSlowmode}s)` : '';
@@ -62,10 +75,32 @@ export async function renderDashboard(userId: string) {
             // Format Interval
             const intervalDisplay = `${formatDuration(task.minDelay / 1000)} - ${formatDuration(task.maxDelay / 1000)}`;
 
-            // Single Field per Task (Clean & Compact with Emojis)
+            // Countdown Next Post (Live Discord Relative Timestamp)
+            let nextRunDisplay = '`Stopped`';
+            if (isRunning) {
+                const effectiveInterval = (task.dynamicDelay && task.channelSlowmode && task.channelSlowmode > 0)
+                    ? task.channelSlowmode * 1000
+                    : task.minDelay;
+
+                const targetTime = (task as any).nextRun 
+                    ? new Date((task as any).nextRun).getTime() 
+                    : (task.lastRun ? new Date(task.lastRun).getTime() + effectiveInterval : null);
+
+                if (targetTime) {
+                    if (targetTime > Date.now()) {
+                        nextRunDisplay = `<t:${Math.floor(targetTime / 1000)}:R>`;
+                    } else {
+                        nextRunDisplay = '`Sending soon...`';
+                    }
+                } else {
+                    nextRunDisplay = '`Sending soon...`';
+                }
+            }
+
+            // Single Field per Task
             embed.addFields({
                 name: `${statusIcon} **${accountName}**`,
-                value: `<a:arrow:1306059259615903826> Server : **${guildDisplay}**\n<a:arrow:1306059259615903826> Channel : ${channelDisplay} ${slowmodeDisplay}\n<a:arrow:1306059259615903826> Interval : \`${intervalDisplay}\`\n<a:arrow:1306059259615903826> Sent : **${(task.totalSent ?? 0).toLocaleString()}**`,
+                value: `${theme.emojis.bullet} Server : **${guildDisplay}**\n${theme.emojis.bullet} Channel : ${channelDisplay} ${slowmodeDisplay}\n${theme.emojis.bullet} Interval : \`${intervalDisplay}\`\n${theme.emojis.bullet} Next Post : ${nextRunDisplay}\n${theme.emojis.bullet} Sent : **${(task.totalSent ?? 0).toLocaleString()}**`,
                 inline: false
             });
 
@@ -73,17 +108,15 @@ export async function renderDashboard(userId: string) {
                 label: `${accountName} -> ${task.guildName?.substring(0, 20) || 'Server'}`,
                 description: `Status: ${task.status}`,
                 value: task.id,
-                emoji: isRunning ? { id: '1306062154616537109', animated: true } : { id: '1306203222263988285', animated: true }
+                emoji: isRunning ? theme.emojis.active : theme.emojis.inactive
             });
         });
 
         if (tasks.length > 10) {
-            embed.setFooter({ text: `...and ${tasks.length - 10} more tasks.` });
+            embed.setFooter({ text: `${theme.branding.footerText} • ...and ${tasks.length - 10} more tasks.` });
         }
 
         const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-
-        // Removed "Back to Menu" button as requested
 
         return {
             content: null,

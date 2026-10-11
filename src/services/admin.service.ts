@@ -2,6 +2,7 @@ import prisma from '../database/client';
 import { WorkspaceService } from './workspace.service';
 import { Logger } from '../utils/logger';
 import { Client } from 'discord.js';
+import { config } from '../config';
 
 export class AdminService {
     
@@ -75,23 +76,32 @@ export class AdminService {
     }
 
     static async addTime(userId: string, days: number, hours: number = 0, minutes: number = 0, client?: Client) {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (!user) throw new Error('User not found');
-
-        let newExpiry = user.expiryDate ? new Date(user.expiryDate) : new Date();
-        // If expired, start from now
-        if (newExpiry < new Date()) newExpiry = new Date();
+        let user = await prisma.user.findUnique({ where: { id: userId } });
+        const now = new Date();
+        let newExpiry = user?.expiryDate && user.expiryDate > now ? new Date(user.expiryDate) : new Date(now);
         
         const durationMs = (days * 24 * 60 * 60 * 1000) + (hours * 60 * 60 * 1000) + (minutes * 60 * 1000);
         newExpiry.setTime(newExpiry.getTime() + durationMs);
 
-        const updatedUser = await prisma.user.update({
+        const updatedUser = await prisma.user.upsert({
             where: { id: userId },
-            data: { expiryDate: newExpiry }
+            update: { expiryDate: newExpiry },
+            create: {
+                id: userId,
+                expiryDate: newExpiry
+            }
         });
 
-        if (client) {
-            await WorkspaceService.refreshControlPanel(client, userId);
+        if (client && config.guildId) {
+            if (!updatedUser.workspaceChannelId) {
+                try {
+                    await WorkspaceService.createWorkspace(client, config.guildId, userId);
+                } catch (wsErr) {
+                    Logger.error('Failed to auto create workspace on addTime', wsErr, 'AdminService');
+                }
+            } else {
+                await WorkspaceService.refreshControlPanel(client, userId);
+            }
         }
 
         return updatedUser;

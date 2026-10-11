@@ -23,6 +23,20 @@ const AUTH_TAG_LENGTH = 16; // GCM auth tag length
 const ALGORITHM = 'aes-256-gcm';
 
 /**
+ * Membersihkan token dari karakter asing, quotes, newlines, tabs, dll.
+ * 
+ * @param token - String token yang akan dibersihkan
+ * @returns Token yang sudah bersih
+ */
+export function sanitizeToken(token: string): string {
+    if (!token || typeof token !== 'string') return '';
+    return token
+        .replace(/^["'`]|["'`]$/g, '') // Hapus quotes di awal & akhir
+        .replace(/[\r\n\t\s]/g, '')    // Hapus whitespace, carriage return, newline, tab
+        .trim();
+}
+
+/**
  * Encrypt text menggunakan AES-256-GCM (Authenticated Encryption)
  * Format output: iv:authTag:encryptedData (semua dalam hex)
  * 

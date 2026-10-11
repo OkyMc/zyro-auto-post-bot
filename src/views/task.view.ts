@@ -1,7 +1,9 @@
 import { Task, Account } from '@prisma/client';
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ThemeService } from '../config/theme.config';
 
 export function renderTaskPanel(task: Task & { account?: Account | null }, overrideStatus?: string) {
+    const theme = ThemeService.getTheme();
     const status = overrideStatus || task.status;
     
     // Sanitize Inputs
@@ -16,42 +18,69 @@ export function renderTaskPanel(task: Task & { account?: Account | null }, overr
     }
     if (!msgPreview) msgPreview = '(No Content)';
 
-    let statusIcon = '<a:offline:1306203222263988285>';
-    if (status === 'RUNNING') statusIcon = '<a:on:1306062154616537109>';
-    else if (status === 'PROCESSING') statusIcon = '<a:loading_gif:1306062016611614741>';
-    else if (status === 'SUBSCRIPTION_EXPIRED') statusIcon = '❌';
+    let statusIcon = theme.emojis.inactive;
+    if (status === 'RUNNING') statusIcon = theme.emojis.active;
+    else if (status === 'PROCESSING') statusIcon = theme.emojis.pending;
+    else if (status === 'SUBSCRIPTION_EXPIRED') statusIcon = theme.emojis.error;
 
     const displayStatus = status === 'SUBSCRIPTION_EXPIRED' ? 'SUBSCRIPTION EXPIRED' : status;
 
+    const isRunning = status === 'RUNNING';
+    let nextRunDisplay = '`Stopped`';
+    if (isRunning) {
+        const effectiveInterval = (task.dynamicDelay && task.channelSlowmode && task.channelSlowmode > 0)
+            ? task.channelSlowmode * 1000
+            : task.minDelay;
+
+        const targetTime = (task as any).nextRun 
+            ? new Date((task as any).nextRun).getTime() 
+            : (task.lastRun ? new Date(task.lastRun).getTime() + effectiveInterval : null);
+
+        if (targetTime) {
+            if (targetTime > Date.now()) {
+                nextRunDisplay = `<t:${Math.floor(targetTime / 1000)}:R>`;
+            } else {
+                nextRunDisplay = '`Sending soon...`';
+            }
+        } else {
+            nextRunDisplay = '`Sending soon...`';
+        }
+    }
+
     const embed = new EmbedBuilder()
         .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK CONFIGURATION** <a:GREEN_CROWN:1306056562435035190>
+## ${theme.emojis.crown} **TASK CONFIGURATION** ${theme.emojis.crown}
 \u200b
 **PROCESS STATUS**
-<a:arrow:1306059259615903826> Status  : ${statusIcon} **${displayStatus}**
-<a:arrow:1306059259615903826> Account : **${accountName}**
+${theme.emojis.bullet} Status    : ${statusIcon} **${displayStatus}**
+${theme.emojis.bullet} Account   : **${accountName}**
 
 **TARGET & TIMING**
-<a:arrow:1306059259615903826> Target  : <#${task.channelId}>
-<a:arrow:1306059259615903826> Interval: **${minDelay}s - ${maxDelay}s**
-<a:arrow:1306059259615903826> Sent    : **${task.totalSent.toLocaleString()}**
+${theme.emojis.bullet} Target    : <#${task.channelId}>
+${theme.emojis.bullet} Interval  : **${minDelay}s - ${maxDelay}s**
+${theme.emojis.bullet} Next Post : ${nextRunDisplay}
+${theme.emojis.bullet} Sent      : **${task.totalSent.toLocaleString()}**
 
 **MESSAGE CONTENT**
 \`\`\`
 ${msgPreview}
 \`\`\`
 `)
-        .setColor(0x57F287)
-        .setFooter({ text: 'AutoPost | Powered by Frey' })
-        .setTimestamp()
-        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
+        .setColor(ThemeService.parseColor(theme.colors.success))
+        .setFooter({ text: theme.branding.footerText })
+        .setTimestamp();
+
+    if (theme.branding.bannerUrl) {
+        embed.setImage(theme.branding.bannerUrl);
+    }
 
     const row = new ActionRowBuilder<ButtonBuilder>();
     
     row.addComponents(
         new ButtonBuilder()
             .setCustomId('btn_back_menu')
-            .setLabel('⬅️ Back to Menu')
+            .setLabel('Back to Menu')
+            .setEmoji('⬅️')
             .setStyle(ButtonStyle.Secondary)
     );
     
@@ -60,6 +89,7 @@ ${msgPreview}
             new ButtonBuilder()
                 .setCustomId(`btn_stop_task_${task.id}`)
                 .setLabel('Stop Process')
+                .setEmoji(theme.emojis.stop)
                 .setStyle(ButtonStyle.Danger)
         );
     } else if (status === 'PROCESSING') {
@@ -67,6 +97,7 @@ ${msgPreview}
             new ButtonBuilder()
                 .setCustomId(`btn_processing_${task.id}`)
                 .setLabel('Processing...')
+                .setEmoji(theme.emojis.pending)
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(true)
         );
@@ -75,6 +106,7 @@ ${msgPreview}
             new ButtonBuilder()
                 .setCustomId(`btn_resume_task_${task.id}`)
                 .setLabel('Start Process')
+                .setEmoji('▶️')
                 .setStyle(ButtonStyle.Success)
         );
     }
@@ -85,18 +117,22 @@ ${msgPreview}
             new ButtonBuilder()
                 .setCustomId(`btn_edit_msg_${task.id}`)
                 .setLabel('Edit Message')
+                .setEmoji('✏️')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId(`btn_edit_delay_${task.id}`)
                 .setLabel('Edit Delay')
+                .setEmoji(theme.emojis.clock)
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId(`btn_preview_task_${task.id}`)
                 .setLabel('Preview Message')
+                .setEmoji('👁️')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId(`btn_delete_task_${task.id}`)
                 .setLabel('Delete')
+                .setEmoji('🗑️')
                 .setStyle(ButtonStyle.Secondary)
         );
 

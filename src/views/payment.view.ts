@@ -2,7 +2,7 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'disc
 
 export function renderPaymentInvoice(productName: string, price: number, qrUrl: string, transactionId: string) {
     const embed = new EmbedBuilder()
-        .setAuthor({ name: 'FREY PAYMENT' })
+        .setAuthor({ name: 'ZYRO POST PAYMENT' })
         .setDescription(`
 **Invoice Details**
 » Product : **${productName}**
@@ -10,16 +10,16 @@ export function renderPaymentInvoice(productName: string, price: number, qrUrl: 
 » TRX ID  : \`${transactionId}\`
 
 **Payment Instructions**
-<a:arrow:1306059259615903826> Scan the QRIS using E-Wallet or Banking.
-<a:arrow:1306059259615903826> Status will update automatically (1-2 mins).
-<a:arrow:1306059259615903826> Check subscription status in Control Panel.
+🔹 Scan the QRIS using E-Wallet or Banking.
+🔹 Status will update automatically (1-2 mins).
+🔹 Check subscription status in Control Panel.
 
 \u200b
 *QRIS is valid for 15 minutes.*
 `)
         .setColor(0x57F287) // Discord Green
         .setImage(qrUrl)
-        .setFooter({ text: 'AutoPost Payment System' })
+        .setFooter({ text: 'Zyro Post Payment System' })
         .setTimestamp();
 
     const row = new ActionRowBuilder<ButtonBuilder>()
@@ -27,10 +27,12 @@ export function renderPaymentInvoice(productName: string, price: number, qrUrl: 
             new ButtonBuilder()
                 .setCustomId(`btn_check_payment_${transactionId}`)
                 .setLabel('Check Status')
+                .setEmoji('🔍')
                 .setStyle(ButtonStyle.Success),
             new ButtonBuilder()
                 .setCustomId(`btn_cancel_payment_${transactionId}`)
                 .setLabel('Cancel Transaction')
+                .setEmoji('🗑️')
                 .setStyle(ButtonStyle.Danger)
         );
 
@@ -39,8 +41,8 @@ export function renderPaymentInvoice(productName: string, price: number, qrUrl: 
 
 export function renderPaymentSuccess(productName: string = 'Premium Plan', price: number = 0, transactionId: string) {
     const embed = new EmbedBuilder()
-        .setAuthor({ name: 'FREY PAYMENT' })
-        .setTitle('PAYMENT SUCCESSFUL ✅')
+        .setAuthor({ name: 'ZYRO POST PAYMENT' })
+        .setTitle('✅ PAYMENT SUCCESSFUL')
         .setDescription(`
 **Thank You!**
 Your payment has been received and your subscription is active.
@@ -55,7 +57,7 @@ Your payment has been received and your subscription is active.
 2. Go to your **Control Panel** to manage tasks.
 `)
         .setColor(0x57F287) // Green
-        .setFooter({ text: 'AutoPost Payment System' })
+        .setFooter({ text: 'Zyro Post Payment System' })
         .setTimestamp();
 
     return { embeds: [embed], components: [] };

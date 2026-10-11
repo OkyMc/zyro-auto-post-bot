@@ -1,17 +1,31 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { AdminService } from '../services/admin.service';
 import { Logger } from '../utils/logger';
+import { ThemeService } from '../config/theme.config';
+import { PluginService } from '../services/plugin.service';
 
 export async function renderControlPanel(userId: string) {
     try {
+        const customRenderer = PluginService.getViewOverride('controlPanel');
+        if (customRenderer) {
+            return await customRenderer(userId);
+        }
+
+        const theme = ThemeService.getTheme();
         const data = await AdminService.getUserControlPanelData(userId);
         const { user, accountCount, activeTaskCount, totalMessagesSent } = data;
 
-        // Calculate Duration
-        let durationDisplay = '∞';
+        // Calculate Duration & Status
+        let durationDisplay = 'Pending Approval';
         let isExpired = false;
+        let isPending = false;
+        let embedColor = ThemeService.parseColor(theme.colors.success);
 
-        if (user?.expiryDate) {
+        if (!user?.expiryDate) {
+            isPending = true;
+            durationDisplay = 'Menunggu Konfirmasi Admin';
+            embedColor = ThemeService.parseColor(theme.colors.warning);
+        } else {
             const now = new Date();
             const expiry = new Date(user.expiryDate);
             const diffMs = expiry.getTime() - now.getTime();
@@ -30,48 +44,64 @@ export async function renderControlPanel(userId: string) {
                 } else {
                     durationDisplay = `${days}d ${hours}h remaining`;
                 }
+                embedColor = ThemeService.parseColor(theme.colors.success);
             } else {
                 durationDisplay = 'Expired';
                 isExpired = true;
+                embedColor = ThemeService.parseColor(theme.colors.danger);
             }
         }
 
-        const usernameDisplay = user?.username || userId;
+        const isDisabled = isPending || isExpired;
+
+        let statusDescription = '';
+        if (isPending) {
+            statusDescription = `\n${theme.emojis.pending} **WORKSPACE TERKUNCI (PENDING APPROVAL)**\nSilakan selesaikan pembayaran sesuai instruksi di atas, lalu tunggu admin melakukan approve workspace.`;
+        } else if (isExpired) {
+            statusDescription = `\n${theme.emojis.error} **SUBSCRIPTION EXPIRED (LOCKED)**\nMasa aktif telah habis. Silakan perpanjang paket untuk membuka kembali akses.`;
+        }
 
         const embed = new EmbedBuilder()
             .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **AUTO POST PANEL** <a:GREEN_CROWN:1306056562435035190>
+## ${theme.emojis.crown} **${theme.ui.controlPanelTitle}** ${theme.emojis.crown}
 \u200b
 **SUBSCRIPTION STATUS**
-<a:arrow:1306059259615903826> Expires in  : **${durationDisplay}**
-${isExpired ? '\n❌ **SUBSCRIPTION EXPIRED**\nPlease renew your plan to continue using the service.' : ''}
+${theme.emojis.bullet} Status Access : **${isPending ? '🔒 Locked (Pending)' : isExpired ? '❌ Expired' : '✅ Active'}**
+${theme.emojis.bullet} Expires in    : **${durationDisplay}**${statusDescription}
+
 **INFRASTRUCTURE**
-<a:arrow:1306059259615903826> Connected Accounts : **${accountCount}**
-<a:arrow:1306059259615903826> Active Workers     : **${activeTaskCount}**
-         <a:arrow:1306059259615903826> Total Messages Sent      : **${totalMessagesSent.toLocaleString()}**
+${theme.emojis.bullet} Connected Accounts : **${accountCount}**
+${theme.emojis.bullet} Active Workers     : **${activeTaskCount}**
+${theme.emojis.bullet} Total Messages Sent : **${totalMessagesSent.toLocaleString()}**
 `)
-            .setColor(isExpired ? 0xED4245 : 0x57F287)
-            .setFooter({ text: 'AutoPost | Powered by Frey' })
-            .setTimestamp()
-            .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
+            .setColor(embedColor)
+            .setFooter({ text: theme.branding.footerText })
+            .setTimestamp();
+
+        if (theme.branding.bannerUrl) {
+            embed.setImage(theme.branding.bannerUrl);
+        }
 
         const row1 = new ActionRowBuilder<ButtonBuilder>()
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId('btn_add_account')
                     .setLabel('Add Account')
+                    .setEmoji(theme.emojis.add)
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(isExpired),
+                    .setDisabled(isDisabled),
                 new ButtonBuilder()
                     .setCustomId('btn_setup_task')
                     .setLabel('New Task')
+                    .setEmoji('📝')
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(isExpired),
+                    .setDisabled(isDisabled),
                 new ButtonBuilder()
                     .setCustomId('btn_view_tasks')
                     .setLabel('Manage Tasks')
+                    .setEmoji(theme.emojis.gear)
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(isExpired)
+                    .setDisabled(isDisabled)
             );
 
         const row2 = new ActionRowBuilder<ButtonBuilder>()
@@ -79,13 +109,15 @@ ${isExpired ? '\n❌ **SUBSCRIPTION EXPIRED**\nPlease renew your plan to continu
                 new ButtonBuilder()
                     .setCustomId('btn_manage_accounts')
                     .setLabel('Manage Accounts')
+                    .setEmoji('👥')
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(isExpired),
+                    .setDisabled(isDisabled),
                 new ButtonBuilder()
                     .setCustomId('btn_stop_all')
                     .setLabel('Stop All')
+                    .setEmoji(theme.emojis.stop)
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(isExpired)
+                    .setDisabled(isDisabled)
             );
 
         return { content: null, embeds: [embed], components: [row1, row2] };

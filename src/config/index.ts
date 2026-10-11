@@ -33,6 +33,7 @@ export const config = {
     botToken: process.env.BOT_TOKEN,
     encryptionKey: process.env.ENCRYPTION_KEY,
     webhookUrl: process.env.WEBHOOK_URL,
+    enablePayment: process.env.ENABLE_PAYMENT === 'true',
     pakasir: {
         apiKey: process.env.PAKASIR_API_KEY,
         projectSlug: process.env.PAKASIR_PROJECT_SLUG,
@@ -41,11 +42,23 @@ export const config = {
     guildId: process.env.GUILD_ID,
     adminId: process.env.ADMIN_ID,
     adminRoleId: process.env.ADMIN_ROLE_ID,
-    clientId: process.env.CLIENT_ID
+    clientId: process.env.CLIENT_ID,
+    license: {
+        key: process.env.LICENSE_KEY || '',
+        serverUrl: process.env.LICENSE_SERVER_URL || 'https://license.yourdomain.com',
+        checkIntervalMinutes: parseInt(process.env.LICENSE_CHECK_INTERVAL_MINUTES || '30', 10),
+        enabled: process.env.ENABLE_LICENSE_CHECK !== 'false' // default true
+    }
 };
 
 // Basic Validation
-const requiredEnv = ['BOT_TOKEN', 'ENCRYPTION_KEY', 'PAKASIR_API_KEY', 'PAKASIR_PROJECT_SLUG', 'GUILD_ID', 'ADMIN_ID'];
+const requiredEnv = ['BOT_TOKEN', 'ENCRYPTION_KEY', 'GUILD_ID', 'ADMIN_ID'];
+if (config.enablePayment) {
+    requiredEnv.push('PAKASIR_API_KEY', 'PAKASIR_PROJECT_SLUG');
+}
+if (config.license.enabled) {
+    requiredEnv.push('LICENSE_KEY');
+}
 const missing = requiredEnv.filter(key => !process.env[key]);
 
 if (missing.length > 0) {

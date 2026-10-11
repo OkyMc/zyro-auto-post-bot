@@ -1,12 +1,14 @@
-import { StringSelectMenuInteraction, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { StringSelectMenuInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags } from 'discord.js';
 import { AccountService } from '../services/account.service';
-import { TaskService } from '../services/task.service';
 import { WorkerService } from '../services/worker.service';
+import { TaskService } from '../services/task.service';
+import { WorkspaceService } from '../services/workspace.service';
 import { renderTaskPanel } from '../views/task.view';
-import { Logger } from '../utils/logger';
-import { validateOwnership } from '../utils/interactionGuard';
 import { renderAccountDetail } from '../views/account.view';
 import { WorkerGuild, WorkerChannel } from '../interfaces/worker';
+import { Logger } from '../utils/logger';
+import { validateOwnership } from '../utils/interactionGuard';
+import { PRODUCTS, config } from '../config';
 
 export async function handleSelect(interaction: StringSelectMenuInteraction) {
     // Security Check
@@ -16,13 +18,50 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
     const { customId } = interaction;
 
     try {
+        // ==================== ORDER PLAN SELECTION ====================
+        if (customId === 'select_order_plan') {
+            const planKey = interaction.values[0];
+            const product = PRODUCTS[planKey] || PRODUCTS['7_DAYS'];
+
+            await interaction.deferUpdate();
+
+            try {
+                const targetGuildId = config.guildId || interaction.guildId;
+                if (!targetGuildId) {
+                    await interaction.followUp({ content: '❌ `GUILD_ID` belum disetting di `.env`.', flags: MessageFlags.Ephemeral });
+                    return;
+                }
+
+                const channel = await WorkspaceService.createPendingWorkspace(
+                    interaction.client,
+                    targetGuildId,
+                    interaction.user.id,
+                    planKey
+                );
+
+                await interaction.editReply({
+                    content: `🎉 **Permintaan Workspace Berhasil Dibuat!**\nChannel privat kamu telah disiapkan di <#${channel?.id}> (Paket: **${product.name}**).\nSilakan buka channel tersebut untuk melihat rincian pembayaran & menunggu persetujuan admin! 🔥`,
+                    embeds: [],
+                    components: []
+                });
+            } catch (err: any) {
+                Logger.error('Failed to create pending workspace from plan selection', err, 'SelectHandler');
+                await interaction.editReply({
+                    content: `❌ Gagal membuat workspace: ${err.message}`,
+                    embeds: [],
+                    components: []
+                });
+            }
+            return;
+        }
+
         if (customId === 'select_account_task') {
             const accountId = interaction.values[0];
             
-            // Get account name first for loading state
+            // Get account info first
             const account = await AccountService.getById(accountId);
             if (!account) {
-                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                await interaction.reply({ content: '❌ Account not found.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const accountName = account.name || 'Unknown';
@@ -30,16 +69,16 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
             // Show loading state immediately
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:loading_gif:1306062016611614741> Server : *Fetching...*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+⏳ Server : *Fetching...*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.update({
@@ -50,7 +89,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
             try {
                 const token = AccountService.getDecryptedToken(account);
-                const guilds = await WorkerService.fetchGuilds(token);
+                const guilds = await WorkerService.fetchGuilds(token, accountId, interaction.user.id);
                 
                 const ITEMS_PER_PAGE = 25;
                 const slicedGuilds = guilds.slice(0, ITEMS_PER_PAGE);
@@ -89,18 +128,18 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
                 const resultEmbed = new EmbedBuilder()
                     .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:arrow:1306059259615903826> Server : *Select from dropdown*
-<a:offline:1306203222263988285> Channel : *Pending*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+🔹 Server : *Select from dropdown*
+⚪ Channel : *Pending*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${guilds.length}** servers (Page 1/${totalPages})
 `)
                     .setColor(0x5865F2)
-                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setFooter({ text: 'Zyro Post' })
                     .setTimestamp();
 
                 await interaction.editReply({
@@ -125,7 +164,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
             // Get account and guild info first
             const account = await AccountService.getById(accountId);
             if (!account) {
-                await interaction.reply({ content: '❌ Account not found.', ephemeral: true });
+                await interaction.reply({ content: '❌ Account not found.', flags: MessageFlags.Ephemeral });
                 return;
             }
             const accountName = account.name || 'Unknown';
@@ -137,16 +176,16 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
             // Show loading state immediately
             const loadingEmbed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : **${guildName}**
-<a:loading_gif:1306062016611614741> Channel : *Fetching...*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+✅ Server : **${guildName}**
+⏳ Channel : *Fetching...*
+⚪ Strategy : *Pending*
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             await interaction.update({
@@ -157,7 +196,7 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
             try {
                 const token = AccountService.getDecryptedToken(account);
-                const channels = await WorkerService.fetchChannels(token, guildId);
+                const channels = await WorkerService.fetchChannels(token, guildId, accountId, interaction.user.id);
 
                 if (channels.length === 0) {
                     await interaction.editReply({ content: '❌ No text channels found.', embeds: [], components: [] });
@@ -200,18 +239,18 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
                 const resultEmbed = new EmbedBuilder()
                     .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **TASK SETUP** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **TASK SETUP** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : **${guildName}**
-<a:arrow:1306059259615903826> Channel : *Select from dropdown*
-<a:offline:1306203222263988285> Strategy : *Pending*
+✅ Account : **${accountName}**
+✅ Server : **${guildName}**
+🔹 Channel : *Select from dropdown*
+⚪ Strategy : *Pending*
 \u200b
 > Found **${channels.length}** channels (Page 1/${totalPages})
 `)
                     .setColor(0x5865F2)
-                    .setFooter({ text: 'AutoPost | Powered by Frey' })
+                    .setFooter({ text: 'Zyro Post' })
                     .setTimestamp();
 
                 await interaction.editReply({
@@ -252,25 +291,25 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
             const embed = new EmbedBuilder()
                 .setDescription(`
-## <a:GREEN_CROWN:1306056562435035190> **CONFIGURE STRATEGY** <a:GREEN_CROWN:1306056562435035190>
+## 👑 **CONFIGURE STRATEGY** 👑
 \u200b
 **PROGRESS**
-<a:Tick_green:1306061558303952937> Account : **${accountName}**
-<a:Tick_green:1306061558303952937> Server : *Selected*
-<a:Tick_green:1306061558303952937> Channel : **#${channelName}**
-<a:arrow:1306059259615903826> Strategy : *Choose below*
+✅ Account : **${accountName}**
+✅ Server : *Selected*
+✅ Channel : **#${channelName}**
+🔹 Strategy : *Choose below*
 \u200b
 **MODE OPTIONS**
-<a:arrow:1306059259615903826> **Automatic** → Delay: **${autoMinDelay}s - ${autoMaxDelay}s**
+🔹 **Automatic** → Delay: **${autoMinDelay}s - ${autoMaxDelay}s**
 > *Formula: Slowmode + 1~3 minutes buffer*
 
-<a:arrow:1306059259615903826> **Manual** → Set custom delay range
+🔹 **Manual** → Set custom delay range
 > *Minimum: ${slowmode > 0 ? slowmode + 's (slowmode)' : '3s'}*
 \u200b
-<a:arrow:1306059259615903826> Channel Slowmode : **${slowmode}s**
+🔹 Channel Slowmode : **${slowmode}s**
 `)
                 .setColor(0x5865F2)
-                .setFooter({ text: 'AutoPost | Powered by Frey' })
+                .setFooter({ text: 'Zyro Post' })
                 .setTimestamp();
 
             const strategyRow = new ActionRowBuilder<ButtonBuilder>()
@@ -301,7 +340,6 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
         }
 
         else if (customId === 'select_manage_task') {
-            // ... (Existing Logic)
             const taskId = interaction.values[0];
             await interaction.deferUpdate();
 
@@ -327,7 +365,6 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
             const view = await renderAccountDetail(accountId);
             await interaction.editReply({ ...view });
         } else {
-            // Unknown select menu - Fallback handler
             Logger.warn(`Unhandled select customId: ${customId}`, 'SelectHandler');
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: '❌ Unknown action.', flags: 1 << 6 });
@@ -336,7 +373,6 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
 
     } catch (error) {
         Logger.error('Select Handler Error', error);
-        // Berikan feedback ke user jika terjadi error
         try {
             if (!interaction.replied && !interaction.deferred) {
                 await interaction.reply({ content: '❌ An error occurred. Please try again.', flags: 1 << 6 });
@@ -344,7 +380,6 @@ export async function handleSelect(interaction: StringSelectMenuInteraction) {
                 await interaction.editReply({ content: '❌ An error occurred. Please try again.' });
             }
         } catch (replyError) {
-            // Ignore reply errors - interaction might have expired
             Logger.warn('Failed to send error feedback to user', 'SelectHandler');
         }
     }

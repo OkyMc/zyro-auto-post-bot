@@ -1,4 +1,4 @@
-import { Client } from 'discord.js';
+import { Client, EmbedBuilder } from 'discord.js';
 import prisma from '../database/client';
 import { WorkerService } from './worker.service';
 import { WorkspaceService } from './workspace.service';
@@ -6,13 +6,11 @@ import { Logger } from '../utils/logger';
 
 export class SchedulerService {
     private static INTERVAL_MS = 60 * 1000; // Check every 1 minute
-    private static CHECK_EXPIRY_WINDOW_MS = 60 * 1000 * 10; // Look back 10 minutes
-    
     private static intervals: NodeJS.Timeout[] = [];
     private static isRunning = false;
+    private static notifiedExpiredUserIds = new Set<string>();
 
     static init(client: Client) {
-        // Prevent multiple init() calls
         if (this.isRunning) {
             Logger.warn('[Scheduler] Service already running. Ignoring duplicate init().', 'SchedulerService');
             return;
@@ -42,17 +40,14 @@ export class SchedulerService {
         Logger.info('[Scheduler] Stopping service...', 'SchedulerService');
         this.isRunning = false;
         
-        // Clear all intervals
         for (const interval of this.intervals) {
             clearInterval(interval);
         }
         this.intervals = [];
     }
 
-    // [NEW] Refresh Panel for users with RUNNING tasks (to update Total Sent stats)
     static async syncActiveUserStats(client: Client) {
         try {
-            // Find users who have at least one RUNNING task
             const activeUsers = await prisma.user.findMany({
                 where: {
                     accounts: {
@@ -68,7 +63,6 @@ export class SchedulerService {
             });
 
             if (activeUsers.length > 0) {
-                // Logger.debug(`[Scheduler] Syncing stats for ${activeUsers.length} active users...`, 'SchedulerService');
                 for (const user of activeUsers) {
                     await WorkspaceService.refreshControlPanel(client, user.id);
                 }
@@ -82,8 +76,7 @@ export class SchedulerService {
         try {
             const now = new Date();
 
-            // 1. Find Running Tasks for Expired Users (The Enforcer)
-            // Logic: Task is RUNNING AND User Expiry < Now
+            // 1. Find Running Tasks for Expired Users
             const illegalTasks = await prisma.task.findMany({
                 where: {
                     status: 'RUNNING',
@@ -106,17 +99,13 @@ export class SchedulerService {
                         const expiryStr = task.account.user.expiryDate ? new Date(task.account.user.expiryDate).toLocaleString('id-ID') : 'Unknown';
                         Logger.info(`[Scheduler] Stopping Task ${task.id} (User ${task.account.user.username} expired at ${expiryStr})`, 'SchedulerService');
                         await WorkerService.stopTask(client, task.id, 'Subscription Expired');
-                        // stopTask automatically refreshes the panel, so we get visual update for free here.
                     } catch (err) {
                         Logger.error(`[Scheduler] Failed to stop task ${task.id}`, err, 'SchedulerService');
                     }
                 }
             }
 
-            // 2. Visual Update for Users who just expired (but had no running tasks)
-            // We want to catch users who expired in the last interval window to update their panel color.
-            // If we check ALL expired users every minute, we might spam Discord API rate limits.
-            // So we check users expired between (NOW - INTERVAL - BUFFER) and NOW.
+            // 2. Visual Update & DM Notification for Expired Users
             const checkWindow = new Date(now.getTime() - this.INTERVAL_MS - 10000); // 1m 10s lookback
 
             const recentlyExpiredUsers = await prisma.user.findMany({
@@ -125,17 +114,42 @@ export class SchedulerService {
                         lt: now,
                         gt: checkWindow
                     },
-                    workspaceChannelId: { not: null } // Only if they have a workspace
+                    workspaceChannelId: { not: null }
                 }
             });
 
-            if (recentlyExpiredUsers.length > 0) {
-                Logger.info(`[Scheduler] Found ${recentlyExpiredUsers.length} recently expired users. Refreshing panels...`, 'SchedulerService');
-                for (const user of recentlyExpiredUsers) {
-                    // Check if we already refreshed via stopTask (optimization)
-                    const hadRunningTask = illegalTasks.some(t => t.account.userId === user.id);
-                    if (!hadRunningTask) {
-                        await WorkspaceService.refreshControlPanel(client, user.id);
+            for (const user of recentlyExpiredUsers) {
+                // Refresh Panel to Red (Locked)
+                await WorkspaceService.refreshControlPanel(client, user.id);
+
+                // Send DM Notification to Buyer if not notified recently
+                if (!this.notifiedExpiredUserIds.has(user.id)) {
+                    this.notifiedExpiredUserIds.add(user.id);
+
+                    try {
+                        const discordUser = await client.users.fetch(user.id);
+                        if (discordUser) {
+                            const expiredDmEmbed = new EmbedBuilder()
+                                .setTitle('⚠️ MASA AKTIF ZYRO POST TELAH BERAKHIR')
+                                .setDescription(`
+Halo **${discordUser.username}**! Masa aktif langganan Zyro Post kamu telah habis pada \`${new Date(user.expiryDate!).toLocaleString('id-ID')}\`.
+
+⛔ **Dampak:**
+• Seluruh jadwal auto post telah dihentikan (PAUSED).
+• Workspace privat kamu telah dikunci (LOCKED).
+
+💡 **Cara Mengaktifkan Kembali:**
+Silakan hubungi Seller / Admin atau gunakan tombol **Order** di channel Store untuk melakukan perpanjangan paket.
+`)
+                                .setColor(0xED4245)
+                                .setFooter({ text: 'Zyro Post • Subscription Watchdog' })
+                                .setTimestamp();
+
+                            await discordUser.send({ embeds: [expiredDmEmbed] });
+                            Logger.info(`[Scheduler] Sent expired DM notification to ${discordUser.tag}`, 'SchedulerService');
+                        }
+                    } catch {
+                        // Abaikan jika user menutup DM
                     }
                 }
             }

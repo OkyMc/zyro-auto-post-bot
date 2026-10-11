@@ -1,10 +1,14 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import { PRODUCTS } from '../config';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, MessageFlags } from 'discord.js';
+import { PRODUCTS, config } from '../config';
+import { ThemeService } from '../config/theme.config';
+import { PluginService } from '../services/plugin.service';
 
 export function renderTerms(targetProductId?: string) {
+    const theme = ThemeService.getTheme();
+
     // Embed 1: English
     const embedEnglish = new EmbedBuilder()
-        .setTitle('<a:alert:1306298772124336178> TERMS & DISCLAIMER (ENGLISH) <a:alert:1306298772124336178>')
+        .setTitle('⚠️ TERMS & DISCLAIMER (ENGLISH) ⚠️')
         .setDescription(`
 1. **Strictly Against ToS**
 Automating user accounts (Self-botting) is a direct violation of Discord Terms of Service.
@@ -27,11 +31,11 @@ We only provide technical support for the bot itself. We cannot help unban your 
 7. **Use Alt Accounts**
 We strongly recommend using secondary/burner accounts. Never run this tool on your main personal account.
 `)
-        .setColor(0xED4245); // Red
+        .setColor(ThemeService.parseColor(theme.colors.danger));
 
     // Embed 2: Indonesia
     const embedIndo = new EmbedBuilder()
-        .setTitle('<a:alert:1306298772124336178> SYARAT & RISIKO (INDONESIA) <a:alert:1306298772124336178>')
+        .setTitle('⚠️ SYARAT & RISIKO (INDONESIA) ⚠️')
         .setDescription(`
 1. **Melanggar ToS**
 Mengotomatisasi akun user (Self-bot) adalah pelanggaran keras terhadap Ketentuan Layanan Discord.
@@ -54,65 +58,132 @@ Kami hanya membantu masalah teknis bot. Kami tidak bisa membantu mengurus akun y
 7. **Gunakan Akun Cadangan**
 Sangat disarankan menggunakan akun kedua/tumbal. Jangan pernah menjalankan alat ini di akun utama Anda.
 `)
-        .setColor(0xED4245) // Red
+        .setColor(ThemeService.parseColor(theme.colors.danger))
         .setFooter({ text: 'By clicking "I Understand", you fully accept these risks.' });
 
     const components: ActionRowBuilder<ButtonBuilder>[] = [];
 
-    // If purchasing, show "I Understand" button
+    // If purchasing / activating, show "I Understand" button
     if (targetProductId) {
         const row = new ActionRowBuilder<ButtonBuilder>()
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId(`btn_confirm_buy_${targetProductId}`)
-                    .setLabel('✅ I Understand & Continue')
+                    .setLabel('✅ I Understand & Create Workspace')
                     .setStyle(ButtonStyle.Success)
             );
         components.push(row);
     }
 
-    return { embeds: [embedEnglish, embedIndo], components, ephemeral: true };
+    return { embeds: [embedEnglish, embedIndo], components, flags: MessageFlags.Ephemeral };
 }
 
 export function renderStore() {
-    const embed = new EmbedBuilder()
-        .setTitle('<a:GREEN_CROWN:1306056562435035190>  **AUTO POST**  <a:GREEN_CROWN:1306056562435035190>')
-        .setDescription(`
-\u200b
-**FEATURES**
-<a:arrow:1306059259615903826> **Full Auto-Post System** (Message Scheduler)
-<a:arrow:1306059259615903826> **Auto Fetch System** (Fetch Server & Channel)
-<a:arrow:1306059259615903826> **Dynamic Cooldown Detection** (Auto Detect Cooldown)
-<a:arrow:1306059259615903826> **Multi-Account Support** (Independent Workers)
-<a:arrow:1306059259615903826> **24/7 Cloud Stability** (No PC needed)
+    const customRenderer = PluginService.getViewOverride('store');
+    if (customRenderer) {
+        return customRenderer();
+    }
 
-**PRICING PLANS**
-${Object.values(PRODUCTS).map(p => `<a:arrow:1306059259615903826> **${p.name}** : Rp ${p.price.toLocaleString('id-ID')} / ${p.durationDays} Days`).join('\n')}
-`)
-        .setColor(0x5865F2) // Discord Blurple
-        .setFooter({ text: 'AutoPost | Powered by Frey' })
-        .setTimestamp()
-        .setImage('https://cdn.discordapp.com/attachments/1420156741059874818/1453538221584551936/standard_1.gif?ex=6979fab5&is=6978a935&hm=91e3d4d0ed490273106ddf8b3d55562f4e450074f3afa51e28a61b18d1fe4f05&');
+    const theme = ThemeService.getTheme();
+    const weeklyPrice = `Rp ${PRODUCTS['7_DAYS'].price.toLocaleString('id-ID')}`;
+    const monthlyPrice = `Rp ${PRODUCTS['30_DAYS'].price.toLocaleString('id-ID')}`;
+
+    const storeContainer = {
+        type: 17,
+        components: [
+            {
+                type: 10,
+                content: `# <:webicon:1511727910560469073>  Make your Workspace\n-# Gunakan panel ini untuk membuat workspace untuk melakukan auto post`
+            },
+            {
+                type: 14,
+                spacing: 1,
+                divider: true
+            },
+            {
+                type: 10,
+                content: `> <:hashtag:1529936590325940284> Full Auto-Post System (Message Scheduler)\n> <:hashtag:1529936590325940284> Auto Fetch System (Fetch Server & Channel)\n> <:hashtag:1529936590325940284> Dynamic Cooldown Detection\n> <:hashtag:1529936590325940284> Multi-Account Support (Independent Workers)\n> <:hashtag:1529936590325940284> 24/7 Cloud Stability (No PC needed)\n\n### <:blankimage:1518625715766165614><:blankimage:1518625715766165614><:blankimage:1518625715766165614> <:folder:1511272912450093157> PRICING PLANS\n\n-# - Weekly Access : ${weeklyPrice} (7 Hari)\n-# - Monthly Access : ${monthlyPrice} (30 Hari)`
+            },
+            {
+                type: 14,
+                spacing: 1,
+                divider: true
+            },
+            {
+                type: 10,
+                content: "<:jasp_support:1513013899048386701>     Please read **Terms And Risk** before you use auto post"
+            }
+        ]
+    };
 
     const row = new ActionRowBuilder<ButtonBuilder>()
         .addComponents(
             new ButtonBuilder()
-                .setCustomId('btn_buy_7_DAYS')
-                .setLabel('Weekly Pass')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('btn_buy_30_DAYS')
-                .setLabel('Monthly Pass')
-                .setStyle(ButtonStyle.Secondary),
+                .setCustomId('btn_order')
+                .setLabel('Order')
+                .setEmoji('🛒')
+                .setStyle(ButtonStyle.Success),
             new ButtonBuilder()
                 .setCustomId('btn_view_terms')
-                .setLabel('📜 Terms & Risks')
+                .setLabel('Terms & Risks')
+                .setEmoji('📜')
                 .setStyle(ButtonStyle.Danger),
             new ButtonBuilder()
                 .setCustomId('btn_view_tutorial')
-                .setLabel('📚 How to get Token')
+                .setLabel('How to get Token')
+                .setEmoji('📚')
                 .setStyle(ButtonStyle.Secondary)
         );
 
-    return { content: null, embeds: [embed], components: [row] };
+    return {
+        flags: 32768,
+        embeds: [],
+        components: [storeContainer, row]
+    };
+}
+
+export function renderOrderPlanSelection() {
+    const theme = ThemeService.getTheme();
+    const weeklyPrice = `Rp ${PRODUCTS['7_DAYS'].price.toLocaleString('id-ID')}`;
+    const monthlyPrice = `Rp ${PRODUCTS['30_DAYS'].price.toLocaleString('id-ID')}`;
+
+    const embed = new EmbedBuilder()
+        .setTitle('🛒 PILIH PAKET LANGGANAN AUTO POST')
+        .setDescription(`
+Silakan pilih paket langganan yang kamu inginkan di bawah ini.
+Setelah memilih paket, workspace privat akan otomatis dibuatkan dan kamu dapat menyelesaikan pembayaran.
+
+**PILIHAN PAKET TERSEDIA:**
+⚡ **Weekly Pass (7 Hari)** — \`${weeklyPrice}\`
+💎 **Monthly Pass (30 Hari)** — \`${monthlyPrice}\`
+
+*Catatan: Workspace baru akan berstatus Locked/Pending hingga pembayaran dikonfirmasi & diapprove oleh admin.*
+`)
+        .setColor(ThemeService.parseColor(theme.colors.primary))
+        .setFooter({ text: `${theme.branding.name} • Order Selection` })
+        .setTimestamp();
+
+    const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('select_order_plan')
+        .setPlaceholder('Pilih paket auto post kamu...')
+        .addOptions(
+            new StringSelectMenuOptionBuilder()
+                .setLabel('Weekly Pass (7 Hari)')
+                .setDescription(`Harga: ${weeklyPrice} • Masa aktif 7 hari`)
+                .setValue('7_DAYS')
+                .setEmoji('⚡'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('Monthly Pass (30 Hari)')
+                .setDescription(`Harga: ${monthlyPrice} • Masa aktif 30 hari (Best Value!)`)
+                .setValue('30_DAYS')
+                .setEmoji('💎')
+        );
+
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+    return {
+        embeds: [embed],
+        components: [row],
+        flags: MessageFlags.Ephemeral
+    };
 }

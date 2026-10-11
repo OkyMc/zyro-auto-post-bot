@@ -7,6 +7,7 @@ import { onMessageCreate } from './events/message';
 import { WorkerService } from './services/worker.service';
 import { StatsService } from './services/stats.service';
 import { SchedulerService } from './services/scheduler.service';
+import { LicenseService } from './services/license.service';
 import { Logger } from './utils/logger';
 import prisma from './database/client';
 import type { Server } from 'http';
@@ -15,10 +16,13 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
     ],
     partials: [Partials.Channel, Partials.Message],
+    rest: {
+        timeout: 60000,
+        retries: 5
+    }
 });
 
 // HTTP Server instance for graceful shutdown
@@ -70,7 +74,17 @@ process.on('warning', (warning) => {
 
 async function main() {
     try {
-        // Start HTTP Server and store instance
+        // 1. Verifikasi License API Key sebelum menyalakan bot & service
+        await LicenseService.verifyOnStartup();
+
+        // 2. Hubungkan callback jika lisensi direvoke saat runtime
+        LicenseService.setOnRevokeCallback(async () => {
+            if (shutdown) {
+                await shutdown('LICENSE_REVOKED');
+            }
+        });
+
+        // 3. Start HTTP Server and store instance
         httpServer = startServer(client);
 
         if (!config.botToken) {
@@ -85,6 +99,9 @@ async function main() {
             Logger.info(`Received ${signal}. Shutting down gracefully...`, 'System');
 
             try {
+                // 0. Stop License Heartbeat
+                LicenseService.stopHeartbeat();
+
                 // 1. Stop Stats Auto-Refresh
                 StatsService.stopAutoRefresh();
 
